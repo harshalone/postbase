@@ -1,0 +1,23 @@
+{
+  "name": "postbase",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "infra:up": "docker compose up -d postgres minio",
+    "infra:down": "docker compose stop postgres minio",
+    "infra:logs": "docker compose logs -f postgres minio",
+    "db:push": "pnpm --filter web db:push",
+    "db:studio": "pnpm --filter web db:studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  }
+}

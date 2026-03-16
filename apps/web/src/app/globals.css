@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand: terracotta from the Postbase logo */
+  --color-brand-50: #fdf4ef;
+  --color-brand-100: #fbe4d5;
+  --color-brand-200: #f5c4a0;
+  --color-brand-300: #eca070;
+  --color-brand-400: #e07d50;
+  --color-brand-500: #c4623a;
+  --color-brand-600: #a84e2d;
+  --color-brand-700: #8c3d22;
+  --color-brand-800: #6f2d18;
+  --color-brand-900: #3d180d;
+}
+
+:root {
+  --background: #0f0f0f;
+  --foreground: #ededed;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
