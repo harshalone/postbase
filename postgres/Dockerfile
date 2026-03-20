@@ -16,10 +16,10 @@ RUN cd /tmp \
     && make && make install \
     && cd /tmp && rm -rf pg_cron
 
-# Install pgmq
+# Install pgmq (Makefile lives in pgmq-extension/ subdirectory since v1.4.x)
 RUN cd /tmp \
     && git clone --depth 1 --branch v1.11.0 https://github.com/pgmq/pgmq.git \
-    && cd pgmq \
+    && cd pgmq/pgmq-extension \
     && make && make install \
     && cd /tmp && rm -rf pgmq
 

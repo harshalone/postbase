@@ -200,6 +200,54 @@ export const storageConnections = postbaseSchema.table(
   })
 );
 
+// ─── Email settings ───────────────────────────────────────────────────────────
+
+export const emailSettings = postbaseSchema.table("email_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" })
+    .unique(),
+  provider: text("provider").notNull().default("smtp"), // 'smtp' | 'ses'
+  // SMTP fields
+  smtpHost: text("smtp_host"),
+  smtpPort: integer("smtp_port"),
+  smtpUser: text("smtp_user"),
+  smtpPassword: text("smtp_password"),
+  smtpSecure: boolean("smtp_secure").default(true),
+  smtpFrom: text("smtp_from"),
+  // AWS SES fields
+  sesRegion: text("ses_region"),
+  sesAccessKeyId: text("ses_access_key_id"),
+  sesSecretAccessKey: text("ses_secret_access_key"),
+  sesFrom: text("ses_from"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── Email templates ──────────────────────────────────────────────────────────
+
+export const emailTemplates = postbaseSchema.table(
+  "email_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // 'magic_link' | 'otp'
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    projectTypeUnique: index("email_templates_project_type_idx").on(
+      t.projectId,
+      t.type
+    ),
+  })
+);
+
 // ─── Audit logs ───────────────────────────────────────────────────────────────
 
 export const auditLogs = postbaseSchema.table(
@@ -241,6 +289,11 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   storageBuckets: many(storageBuckets),
   storageConnections: many(storageConnections),
   auditLogs: many(auditLogs),
+  emailSettings: one(emailSettings, {
+    fields: [projects.id],
+    references: [emailSettings.projectId],
+  }),
+  emailTemplates: many(emailTemplates),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({

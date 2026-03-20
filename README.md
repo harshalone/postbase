@@ -37,6 +37,14 @@ Open `.env` and set your secret:
 openssl rand -base64 32
 ```
 
+### 1 Run the dev sh
+```
+./dev.sh
+
+./dev.sh --rebuild // is your go-to when you change the Dockerfile
+
+```
+
 Paste the output as `NEXTAUTH_SECRET` in your `.env`.
 
 ### 2. Start the services
