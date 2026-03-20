@@ -7,13 +7,18 @@ import {
   Plus,
   Trash2,
   RefreshCw,
-  Play,
-  Pause,
+  Search,
+  MoreVertical,
+  X,
+  Edit2,
+  Globe,
+  Code2,
   Send,
   Inbox,
-  X,
   PackagePlus,
   AlertTriangle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -57,16 +62,62 @@ type QueueMessage = {
 };
 
 type Tab = "cron" | "queues";
+type JobType = "sql" | "http";
 
 // ─── Cron schedule presets ────────────────────────────────────────────────────
 
 const CRON_PRESETS = [
-  { label: "Every minute",  value: "* * * * *"     },
-  { label: "Every 5 min",   value: "*/5 * * * *"   },
-  { label: "Every hour",    value: "0 * * * *"      },
-  { label: "Daily midnight",value: "0 0 * * *"      },
-  { label: "Weekly Sunday", value: "0 0 * * 0"      },
+  { label: "Every 30 seconds", value: "*/30 * * * * *", seconds: true },
+  { label: "Every minute",     value: "* * * * *"                      },
+  { label: "Every 5 minutes",  value: "*/5 * * * *"                    },
+  { label: "Every first of the month, at 00:00", value: "0 0 1 * *"   },
+  { label: "Every night at midnight", value: "0 0 * * *"              },
+  { label: "Every Monday at 2 AM",    value: "0 2 * * 1"              },
 ];
+
+// Human-readable description of a cron expression (very simple)
+function describeCron(expr: string): string {
+  const preset = CRON_PRESETS.find((p) => p.value === expr);
+  if (preset) return preset.label;
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length === 5) {
+    const [min, hour, dom, , dow] = parts;
+    if (min === "*" && hour === "*" && dom === "*" && dow === "*") return "Every minute";
+    if (min.startsWith("*/") && hour === "*") return `Every ${min.slice(2)} minutes`;
+    if (hour.startsWith("*/") && min === "0") return `Every ${hour.slice(2)} hours`;
+  }
+  return expr;
+}
+
+// Format schedule for display in table (e.g. "6 seconds", "5 minutes")
+function formatSchedule(expr: string): string {
+  const desc = describeCron(expr);
+  return desc.replace(/^Every /, "").replace(/^every /, "");
+}
+
+// Visual breakdown of a 5-part cron expression
+function CronVisual({ expr }: { expr: string }) {
+  const parts = expr.trim().split(/\s+/);
+  const labels = ["minute", "hour", "day\n(month)", "month", "day\n(week)"];
+  if (parts.length !== 5) {
+    return <p className="text-sm text-zinc-400">{describeCron(expr)}</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-3 font-mono text-2xl text-white font-light tracking-wide">
+        {parts.map((p, i) => (
+          <span key={i} className="flex flex-col items-center gap-1">
+            <span>{p}</span>
+            <span className="text-[10px] text-zinc-500 font-sans whitespace-pre-wrap text-center leading-tight">
+              {labels[i]}
+            </span>
+          </span>
+        ))}
+      </div>
+      <p className="text-sm text-zinc-400">{describeCron(expr)}</p>
+    </div>
+  );
+}
 
 // ─── Not installed banner ─────────────────────────────────────────────────────
 
@@ -102,6 +153,207 @@ function NotInstalled({
   );
 }
 
+// ─── Cron Job Dialog (Create / Edit) ─────────────────────────────────────────
+
+function CronJobDialog({
+  initial,
+  onClose,
+  onSave,
+  saving,
+}: {
+  initial?: { name: string; schedule: string; command: string; type: JobType };
+  onClose: () => void;
+  onSave: (v: { name: string; schedule: string; command: string; type: JobType }) => void;
+  saving: boolean;
+}) {
+  const isEdit = !!initial;
+  const [name, setName] = useState(initial?.name ?? "");
+  const [schedule, setSchedule] = useState(initial?.schedule ?? "*/5 * * * *");
+  const [type, setType] = useState<JobType>(initial?.type ?? "sql");
+  const [command, setCommand] = useState(initial?.command ?? "");
+  const [showSyntax, setShowSyntax] = useState(false);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-zinc-950 border border-zinc-800 rounded-xl w-full max-w-2xl mx-4 shadow-2xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+          <h2 className="text-base font-semibold text-white">
+            {isEdit ? "Edit cron job" : "Create a new cron job"}
+          </h2>
+          <button
+            onClick={onClose}
+            className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1">
+          <div className="px-6 py-5 space-y-6">
+
+            {/* Name */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-sm text-zinc-300 font-medium">Name</label>
+                {!isEdit && (
+                  <span className="text-xs text-zinc-500">Cron jobs cannot be renamed once created</span>
+                )}
+              </div>
+              <input
+                value={name}
+                onChange={(e) => !isEdit && setName(e.target.value)}
+                disabled={isEdit}
+                placeholder="e.g. cleanup_old_records"
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              />
+            </div>
+
+            {/* Schedule */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-sm text-zinc-300 font-medium">Schedule</label>
+                <span className="text-xs text-zinc-500">Enter a cron expression</span>
+              </div>
+              <input
+                value={schedule}
+                onChange={(e) => setSchedule(e.target.value)}
+                placeholder="*/5 * * * *"
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 mb-3"
+              />
+
+              {/* Preset chips */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                {CRON_PRESETS.map((p) => (
+                  <button
+                    key={p.value}
+                    onClick={() => setSchedule(p.value)}
+                    className={`cursor-pointer px-3 py-1.5 rounded-full text-xs border transition-colors ${
+                      schedule === p.value
+                        ? "bg-brand-500 border-brand-500 text-white"
+                        : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Syntax chart toggle */}
+              <button
+                onClick={() => setShowSyntax((v) => !v)}
+                className="cursor-pointer flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors mb-2"
+              >
+                {showSyntax ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                View syntax chart
+              </button>
+
+              {/* Visual */}
+              {showSyntax && (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-5 py-4">
+                  <p className="text-xs text-zinc-500 mb-3 font-medium uppercase tracking-wider">Schedule (GMT)</p>
+                  <CronVisual expr={schedule} />
+                </div>
+              )}
+
+              {/* Always show description */}
+              {!showSyntax && (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3">
+                  <p className="text-sm text-zinc-400">{describeCron(schedule)}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Type */}
+            <div>
+              <label className="text-sm text-zinc-300 font-medium block mb-2">Type</label>
+              <div className="space-y-2">
+                <button
+                  onClick={() => setType("sql")}
+                  className={`cursor-pointer w-full flex items-center gap-4 px-4 py-3 rounded-lg border transition-colors text-left ${
+                    type === "sql"
+                      ? "border-brand-500 bg-brand-500/10"
+                      : "border-zinc-800 hover:border-zinc-600"
+                  }`}
+                >
+                  <div className={`w-8 h-8 rounded-md flex items-center justify-center ${type === "sql" ? "bg-brand-500/20" : "bg-zinc-800"}`}>
+                    <Code2 size={15} className={type === "sql" ? "text-brand-400" : "text-zinc-500"} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white">SQL Snippet</p>
+                    <p className="text-xs text-zinc-500">Write a SQL snippet to run.</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setType("http")}
+                  className={`cursor-pointer w-full flex items-center gap-4 px-4 py-3 rounded-lg border transition-colors text-left ${
+                    type === "http"
+                      ? "border-brand-500 bg-brand-500/10"
+                      : "border-zinc-800 hover:border-zinc-600"
+                  }`}
+                >
+                  <div className={`w-8 h-8 rounded-md flex items-center justify-center ${type === "http" ? "bg-brand-500/20" : "bg-zinc-800"}`}>
+                    <Globe size={15} className={type === "http" ? "text-brand-400" : "text-zinc-500"} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white">HTTP Request</p>
+                    <p className="text-xs text-zinc-500">Send an HTTP request to any URL.</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Command / URL */}
+            <div>
+              <label className="text-sm text-zinc-300 font-medium block mb-1.5">
+                {type === "sql" ? "SQL Snippet" : "HTTP Request URL"}
+              </label>
+              {type === "sql" ? (
+                <textarea
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="select 1;"
+                  rows={6}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 resize-none"
+                />
+              ) : (
+                <input
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="https://example.com/webhook"
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+                />
+              )}
+              {type === "sql" && (
+                <p className="text-xs text-zinc-600 mt-1">
+                  Unqualified table names resolve to your project schema automatically.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
+          <button
+            onClick={onClose}
+            className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave({ name, schedule, command, type })}
+            disabled={!name.trim() || !command.trim() || saving}
+            className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
+          >
+            {saving ? "Saving…" : isEdit ? "Save changes" : "Create job"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function IntegrationsPage({
@@ -117,10 +369,11 @@ export default function IntegrationsPage({
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
   const [cronLoading, setCronLoading] = useState(true);
   const [installingCron, setInstallingCron] = useState(false);
-  const [showNewJob, setShowNewJob] = useState(false);
-  const [expandedJob, setExpandedJob] = useState<number | null>(null);
-  const [newJob, setNewJob] = useState({ name: "", schedule: "* * * * *", command: "" });
-  const [creatingJob, setCreatingJob] = useState(false);
+  const [search, setSearch] = useState("");
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingJob, setEditingJob] = useState<CronJob | null>(null);
+  const [savingJob, setSavingJob] = useState(false);
+  const [menuOpen, setMenuOpen] = useState<number | null>(null);
 
   // ── Queue state ─────────────────────────────────────────────────────────────
   const [queueInstalled, setQueueInstalled] = useState<boolean | null>(null);
@@ -175,28 +428,58 @@ export default function IntegrationsPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "install" }),
       });
-      fetchCron();
+      await fetchCron();
     } finally {
       setInstallingCron(false);
     }
   }
 
-  async function createJob() {
-    if (!newJob.name || !newJob.command) return;
-    setCreatingJob(true);
+  // Detect job type from command string
+  function detectType(command: string): JobType {
+    return command.trim().toLowerCase().startsWith("select net.http") ? "http" : "sql";
+  }
+
+  async function saveJob(v: { name: string; schedule: string; command: string; type: JobType }) {
+    setSavingJob(true);
     try {
-      const res = await fetch(`/api/dashboard/${projectId}/cron`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create", ...newJob }),
-      });
-      const data = await res.json();
-      if (data.error) { alert(data.error); return; }
-      setShowNewJob(false);
-      setNewJob({ name: "", schedule: "* * * * *", command: "" });
-      fetchCron();
+      // For HTTP type, wrap in net.http_post call if it looks like a plain URL
+      let cmd = v.command.trim();
+      if (v.type === "http" && !cmd.startsWith("select")) {
+        cmd = `select net.http_post(url:='${cmd}')`;
+      }
+
+      if (editingJob) {
+        // Edit: delete old + create new with same name
+        const prefix = `pb_${projectId.replace(/-/g, "")}_`;
+        const displayName = editingJob.jobname.startsWith(prefix)
+          ? editingJob.jobname.slice(prefix.length)
+          : editingJob.jobname;
+        await fetch(`/api/dashboard/${projectId}/cron`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "delete", jobName: displayName }),
+        });
+        const res = await fetch(`/api/dashboard/${projectId}/cron`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "create", jobName: v.name, schedule: v.schedule, command: cmd }),
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+      } else {
+        const res = await fetch(`/api/dashboard/${projectId}/cron`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "create", jobName: v.name, schedule: v.schedule, command: cmd }),
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+      }
+      setShowDialog(false);
+      setEditingJob(null);
+      await fetchCron();
     } finally {
-      setCreatingJob(false);
+      setSavingJob(false);
     }
   }
 
@@ -210,7 +493,6 @@ export default function IntegrationsPage({
   }
 
   async function deleteJob(job: CronJob) {
-    // Strip prefix to get user-visible name
     const prefix = `pb_${projectId.replace(/-/g, "")}_`;
     const displayName = job.jobname.startsWith(prefix)
       ? job.jobname.slice(prefix.length)
@@ -234,7 +516,7 @@ export default function IntegrationsPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "install" }),
       });
-      fetchQueues();
+      await fetchQueues();
     } finally {
       setInstallingQueue(false);
     }
@@ -322,21 +604,25 @@ export default function IntegrationsPage({
 
   const prefix = `pb_${projectId.replace(/-/g, "")}_`;
 
+  const filteredJobs = cronJobs.filter((job) => {
+    const displayName = job.jobname.startsWith(prefix)
+      ? job.jobname.slice(prefix.length)
+      : job.jobname;
+    return displayName.toLowerCase().includes(search.toLowerCase());
+  });
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" onClick={() => setMenuOpen(null)}>
       {/* Header */}
-      <div className="px-8 pt-8 pb-4 border-b border-zinc-800 shrink-0">
-        <h1 className="text-2xl font-bold text-white mb-1">Integrations</h1>
-        <p className="text-zinc-400 text-sm">
-          Manage PostgreSQL extensions — cron jobs and message queues.
-        </p>
-        <div className="flex gap-1 mt-5">
+      <div className="flex items-center justify-between px-6 h-14 border-b border-zinc-800 shrink-0">
+        <h1 className="text-sm font-semibold text-white">Integrations</h1>
+        <div className="flex gap-1">
           {(
             [
-              { id: "cron",   label: "Cron Jobs",       icon: Clock  },
-              { id: "queues", label: "Message Queues",   icon: Layers },
+              { id: "cron",   label: "Cron Jobs",     icon: Clock  },
+              { id: "queues", label: "Message Queues", icon: Layers },
             ] as const
           ).map(({ id, label, icon: Icon }) => (
             <button
@@ -360,7 +646,7 @@ export default function IntegrationsPage({
 
         {/* ── Cron Tab ── */}
         {tab === "cron" && (
-          <div className="p-6 h-full">
+          <div className="flex flex-col h-full">
             {cronLoading ? (
               <p className="text-zinc-600 text-sm pt-8 text-center">Loading…</p>
             ) : !cronInstalled ? (
@@ -372,123 +658,133 @@ export default function IntegrationsPage({
               />
             ) : (
               <>
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-base font-semibold text-white">Scheduled Jobs</h2>
-                    <p className="text-xs text-zinc-500 mt-0.5">{cronJobs.length} job{cronJobs.length !== 1 ? "s" : ""}</p>
+                {/* Cron toolbar */}
+                <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-800">
+                  <div className="relative flex-1 max-w-xs">
+                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search for a job"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
+                    />
                   </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={fetchCron}
-                      className="cursor-pointer p-2 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                    >
-                      <RefreshCw size={14} />
-                    </button>
-                    <button
-                      onClick={() => setShowNewJob(true)}
-                      className="cursor-pointer flex items-center gap-2 px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
-                    >
-                      <Plus size={14} />
-                      New Job
-                    </button>
-                  </div>
+                  <div className="flex-1" />
+                  <button
+                    onClick={fetchCron}
+                    className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-sm transition-colors"
+                  >
+                    <RefreshCw size={13} />
+                    Refresh
+                  </button>
+                  <button
+                    onClick={() => { setEditingJob(null); setShowDialog(true); }}
+                    className="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
+                  >
+                    <Plus size={14} />
+                    Create job
+                  </button>
                 </div>
 
-                {cronJobs.length === 0 ? (
+                {/* Table */}
+                {filteredJobs.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-center">
                     <Clock size={32} className="text-zinc-700 mb-3" />
-                    <p className="text-zinc-500 text-sm">No cron jobs yet.</p>
-                    <button
-                      onClick={() => setShowNewJob(true)}
-                      className="cursor-pointer mt-3 text-brand-400 hover:text-brand-300 text-sm"
-                    >
-                      Create your first job
-                    </button>
+                    <p className="text-zinc-500 text-sm">
+                      {search ? "No jobs match your search." : "No cron jobs yet."}
+                    </p>
+                    {!search && (
+                      <button
+                        onClick={() => { setEditingJob(null); setShowDialog(true); }}
+                        className="cursor-pointer mt-3 text-brand-400 hover:text-brand-300 text-sm"
+                      >
+                        Create your first job
+                      </button>
+                    )}
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {cronJobs.map((job) => {
-                      const displayName = job.jobname.startsWith(prefix)
-                        ? job.jobname.slice(prefix.length)
-                        : job.jobname;
-                      const isExpanded = expandedJob === job.jobid;
-                      return (
-                        <div
-                          key={job.jobid}
-                          className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden"
-                        >
-                          <div className="flex items-center gap-4 px-5 py-4">
-                            {/* Active indicator */}
-                            <div
-                              className={`w-2 h-2 rounded-full shrink-0 ${
-                                job.active ? "bg-green-400" : "bg-zinc-600"
-                              }`}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-white truncate">{displayName}</p>
-                              <p className="text-xs text-zinc-500 font-mono mt-0.5">{job.schedule}</p>
-                            </div>
-                            <code className="hidden md:block text-xs text-zinc-500 bg-zinc-800 px-3 py-1.5 rounded-lg max-w-xs truncate">
-                              {job.command}
-                            </code>
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => setExpandedJob(isExpanded ? null : job.jobid)}
-                                className="cursor-pointer px-2 py-1.5 rounded text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                              >
-                                {isExpanded ? "Hide" : "History"}
-                              </button>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
+                        <th className="text-left px-6 py-3 font-medium">Name</th>
+                        <th className="text-left px-4 py-3 font-medium">Schedule</th>
+                        <th className="text-left px-4 py-3 font-medium">Last run</th>
+                        <th className="text-left px-4 py-3 font-medium">Next run</th>
+                        <th className="text-left px-4 py-3 font-medium">Command</th>
+                        <th className="text-left px-4 py-3 font-medium">Active</th>
+                        <th className="px-4 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/60">
+                      {filteredJobs.map((job) => {
+                        const displayName = job.jobname.startsWith(prefix)
+                          ? job.jobname.slice(prefix.length)
+                          : job.jobname;
+                        const lastRun = job.runs[0];
+                        return (
+                          <tr key={job.jobid} className="hover:bg-zinc-900/40 transition-colors group">
+                            <td className="px-6 py-3 text-white font-medium">{displayName}</td>
+                            <td className="px-4 py-3 text-zinc-400">{formatSchedule(job.schedule)}</td>
+                            <td className="px-4 py-3 text-zinc-500">
+                              {lastRun
+                                ? new Date(lastRun.start_time).toLocaleString()
+                                : <span className="text-zinc-700">—</span>}
+                            </td>
+                            <td className="px-4 py-3 text-zinc-500">
+                              <span className="text-zinc-700">—</span>
+                            </td>
+                            <td className="px-4 py-3 max-w-xs">
+                              <code className="text-xs text-zinc-400 truncate block">{job.command}</code>
+                            </td>
+                            <td className="px-4 py-3">
+                              {/* Toggle switch */}
                               <button
                                 onClick={() => toggleJob(job)}
-                                title={job.active ? "Pause" : "Resume"}
-                                className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                                className={`cursor-pointer relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                                  job.active ? "bg-brand-500" : "bg-zinc-700"
+                                }`}
                               >
-                                {job.active ? <Pause size={14} /> : <Play size={14} />}
+                                <span
+                                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                                    job.active ? "translate-x-[18px]" : "translate-x-[3px]"
+                                  }`}
+                                />
                               </button>
+                            </td>
+                            <td className="px-4 py-3 relative">
                               <button
-                                onClick={() => deleteJob(job)}
-                                className="cursor-pointer p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                                onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === job.jobid ? null : job.jobid); }}
+                                className="cursor-pointer p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100"
                               >
-                                <Trash2 size={14} />
+                                <MoreVertical size={15} />
                               </button>
-                            </div>
-                          </div>
-
-                          {/* Run history */}
-                          {isExpanded && (
-                            <div className="border-t border-zinc-800 px-5 py-3">
-                              <p className="text-xs text-zinc-500 mb-2 font-medium">Last 5 runs</p>
-                              {job.runs.length === 0 ? (
-                                <p className="text-xs text-zinc-700">No run history yet.</p>
-                              ) : (
-                                <div className="space-y-1">
-                                  {job.runs.map((run, i) => (
-                                    <div key={i} className="flex items-center gap-3 text-xs">
-                                      <span
-                                        className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                                          run.status === "succeeded"
-                                            ? "bg-green-900/40 text-green-400"
-                                            : "bg-red-900/40 text-red-400"
-                                        }`}
-                                      >
-                                        {run.status}
-                                      </span>
-                                      <span className="text-zinc-500">
-                                        {new Date(run.start_time).toLocaleString()}
-                                      </span>
-                                      {run.return_message && (
-                                        <span className="text-zinc-600 truncate">{run.return_message}</span>
-                                      )}
-                                    </div>
-                                  ))}
+                              {menuOpen === job.jobid && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-4 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-36"
+                                >
+                                  <button
+                                    onClick={() => { setEditingJob(job); setShowDialog(true); setMenuOpen(null); }}
+                                    className="cursor-pointer w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                  >
+                                    <Edit2 size={13} />
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => { deleteJob(job); setMenuOpen(null); }}
+                                    className="cursor-pointer w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-zinc-800 transition-colors"
+                                  >
+                                    <Trash2 size={13} />
+                                    Delete
+                                  </button>
                                 </div>
                               )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 )}
               </>
             )}
@@ -574,7 +870,6 @@ export default function IntegrationsPage({
                     </div>
                   ) : (
                     <>
-                      {/* Queue header */}
                       <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 shrink-0">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-semibold text-white">{selectedQueue.name}</span>
@@ -606,12 +901,9 @@ export default function IntegrationsPage({
                         </div>
                       </div>
 
-                      {/* Messages list */}
                       <div className="flex-1 overflow-auto">
                         {loadingMessages ? (
-                          <div className="flex items-center justify-center h-32 text-zinc-600 text-sm">
-                            Loading…
-                          </div>
+                          <div className="flex items-center justify-center h-32 text-zinc-600 text-sm">Loading…</div>
                         ) : queueMessages.length === 0 ? (
                           <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
                             <Inbox size={28} className="text-zinc-700" />
@@ -663,92 +955,29 @@ export default function IntegrationsPage({
         )}
       </div>
 
-      {/* ── New Cron Job Dialog ── */}
-      {showNewJob && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-lg mx-4 shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-              <h2 className="text-lg font-semibold text-white">New Cron Job</h2>
-              <button
-                onClick={() => setShowNewJob(false)}
-                className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1.5">Job name</label>
-                <input
-                  value={newJob.name}
-                  onChange={(e) => setNewJob((j) => ({ ...j, name: e.target.value.replace(/\s+/g, "_") }))}
-                  placeholder="cleanup_old_records"
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1.5">Schedule (cron expression)</label>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {CRON_PRESETS.map((p) => (
-                    <button
-                      key={p.value}
-                      onClick={() => setNewJob((j) => ({ ...j, schedule: p.value }))}
-                      className={`cursor-pointer px-2.5 py-1 rounded text-xs transition-colors ${
-                        newJob.schedule === p.value
-                          ? "bg-brand-500 text-white"
-                          : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  value={newJob.schedule}
-                  onChange={(e) => setNewJob((j) => ({ ...j, schedule: e.target.value }))}
-                  placeholder="* * * * *"
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1.5">SQL command</label>
-                <textarea
-                  value={newJob.command}
-                  onChange={(e) => setNewJob((j) => ({ ...j, command: e.target.value }))}
-                  placeholder="DELETE FROM logs WHERE created_at < now() - interval '30 days';"
-                  rows={4}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 resize-none"
-                />
-                <p className="text-xs text-zinc-600 mt-1">
-                  Use unqualified table names — search_path is set to your project schema automatically.
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800">
-              <button
-                onClick={() => setShowNewJob(false)}
-                className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={createJob}
-                disabled={!newJob.name || !newJob.command || creatingJob}
-                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
-              >
-                {creatingJob ? "Scheduling…" : "Schedule Job"}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ── Cron Job Dialog ── */}
+      {showDialog && (
+        <CronJobDialog
+          initial={editingJob ? {
+            name: editingJob.jobname.startsWith(prefix)
+              ? editingJob.jobname.slice(prefix.length)
+              : editingJob.jobname,
+            schedule: editingJob.schedule,
+            command: editingJob.command,
+            type: detectType(editingJob.command),
+          } : undefined}
+          onClose={() => { setShowDialog(false); setEditingJob(null); }}
+          onSave={saveJob}
+          saving={savingJob}
+        />
       )}
 
       {/* ── New Queue Dialog ── */}
       {showNewQueue && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-sm mx-4 shadow-2xl">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-xl w-full max-w-sm mx-4 shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-              <h2 className="text-lg font-semibold text-white">New Queue</h2>
+              <h2 className="text-base font-semibold text-white">New Queue</h2>
               <button
                 onClick={() => setShowNewQueue(false)}
                 className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
@@ -762,7 +991,7 @@ export default function IntegrationsPage({
                 value={newQueueName}
                 onChange={(e) => setNewQueueName(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
                 placeholder="my_queue"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
                 onKeyDown={(e) => { if (e.key === "Enter") createQueue(); }}
               />
             </div>
@@ -788,9 +1017,9 @@ export default function IntegrationsPage({
       {/* ── Send Message Dialog ── */}
       {showSend && selectedQueue && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-sm mx-4 shadow-2xl">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-xl w-full max-w-sm mx-4 shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-              <h2 className="text-lg font-semibold text-white">
+              <h2 className="text-base font-semibold text-white">
                 Send to <span className="text-brand-400">{selectedQueue.name}</span>
               </h2>
               <button
@@ -807,7 +1036,7 @@ export default function IntegrationsPage({
                 onChange={(e) => setSendForm(e.target.value)}
                 placeholder='{"event": "user.created", "userId": "abc123"}'
                 rows={5}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 resize-none"
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 resize-none"
               />
             </div>
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800">

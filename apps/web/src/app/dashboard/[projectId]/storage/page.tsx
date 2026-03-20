@@ -541,54 +541,27 @@ export default function StoragePage({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-8 pt-8 pb-6 border-b border-zinc-800 shrink-0">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Storage</h1>
-            <p className="text-zinc-400 text-sm mt-1">
-              Connect external S3-compatible storage providers for your project.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={fetchConnections}
-              className="cursor-pointer p-2 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-            >
-              <RefreshCw size={14} />
-            </button>
-            <button
-              onClick={openAdd}
-              className="cursor-pointer flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
-            >
-              <Plus size={14} />
-              Add Connection
-            </button>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mt-6">
-          {[
-            { label: "Connections", value: connections.length.toString() },
-            {
-              label: "Default",
-              value: connections.find((c) => c.isDefault)?.name ?? "None",
-            },
-            {
-              label: "Providers",
-              value: [...new Set(connections.map((c) => c.provider))].length.toString(),
-            },
-          ].map((s) => (
-            <div key={s.label} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900">
-              <p className="text-2xl font-bold text-white truncate">{s.value}</p>
-              <p className="text-zinc-500 text-xs mt-1">{s.label}</p>
-            </div>
-          ))}
+      <div className="flex items-center justify-between px-6 h-14 border-b border-zinc-800 shrink-0">
+        <h1 className="text-sm font-semibold text-white">Storage</h1>
+        <div className="flex gap-2">
+          <button
+            onClick={fetchConnections}
+            className="cursor-pointer p-2 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          >
+            <RefreshCw size={14} />
+          </button>
+          <button
+            onClick={openAdd}
+            className="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium transition-colors"
+          >
+            <Plus size={13} />
+            Add Connection
+          </button>
         </div>
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-6">
         {loading ? (
           <div className="flex items-center justify-center py-20 text-zinc-600 text-sm">
             <Loader2 size={18} className="animate-spin mr-2" />

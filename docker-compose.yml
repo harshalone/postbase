@@ -3,6 +3,7 @@ services:
     build:
       context: ./postgres
       dockerfile: Dockerfile
+    image: postbase_postgres
     container_name: postbase_db
     restart: unless-stopped
     environment:

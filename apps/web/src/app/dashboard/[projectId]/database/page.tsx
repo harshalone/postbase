@@ -427,27 +427,30 @@ export default function DatabasePage({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tabs */}
-      <div className="flex items-center gap-1 px-4 h-14 border-b border-zinc-800 shrink-0">
-        {(
-          [
-            { id: "tables", label: "Tables", icon: Table2 },
-            { id: "rls", label: "RLS Policies", icon: Shield },
-          ] as const
-        ).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={`cursor-pointer flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              tab === id
-                ? "bg-zinc-800 text-white"
-                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900"
-            }`}
-          >
-            <Icon size={14} />
-            {label}
-          </button>
-        ))}
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 h-14 border-b border-zinc-800 shrink-0">
+        <h1 className="text-sm font-semibold text-white">Database</h1>
+        <div className="flex items-center gap-1">
+          {(
+            [
+              { id: "tables", label: "Tables", icon: Table2 },
+              { id: "rls", label: "RLS Policies", icon: Shield },
+            ] as const
+          ).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`cursor-pointer flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                tab === id
+                  ? "bg-zinc-800 text-white"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900"
+              }`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Body */}

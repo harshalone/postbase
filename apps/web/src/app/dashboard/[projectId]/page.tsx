@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { users, sessions } from "@/lib/db/schema";
 import { count, eq } from "drizzle-orm";
+import { PageHeader } from "./_components/page-header";
 
 export default async function ProjectOverviewPage({
   params,
@@ -25,10 +26,9 @@ export default async function ProjectOverviewPage({
   ];
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold text-white mb-2">Overview</h1>
-      <p className="text-zinc-400 mb-8">Project dashboard.</p>
-
+    <div className="flex flex-col h-full">
+      <PageHeader title="Overview" />
+      <div className="p-6 overflow-auto">
       <div className="grid grid-cols-2 gap-4 mb-10">
         {stats.map((s) => (
           <div
@@ -63,6 +63,7 @@ const postbase = createClient(
             </pre>
           </li>
         </ol>
+      </div>
       </div>
     </div>
   );

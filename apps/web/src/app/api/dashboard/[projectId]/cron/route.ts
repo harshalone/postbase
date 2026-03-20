@@ -23,10 +23,14 @@ export async function GET(
   try {
     // Check if pg_cron is installed
     const { rows: extRows } = await client.query(
+      `SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron'`
+    );
+    if (extRows.length === 0) return NextResponse.json({ installed: false, jobs: [] });
+
+    const { rows: loadedRows } = await client.query(
       `SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'`
     );
-    const installed = extRows.length > 0;
-    if (!installed) return NextResponse.json({ installed: false, jobs: [] });
+    if (loadedRows.length === 0) return NextResponse.json({ installed: false, jobs: [] });
 
     const prefix = `pb_${projectId.replace(/-/g, "")}_`;
     const { rows: jobs } = await client.query(

@@ -26,11 +26,16 @@ export async function GET(
   const pool = getProjectPool(project.databaseUrl);
   const client = await pool.connect();
   try {
+    // Check if pgmq is installed
     const { rows: extRows } = await client.query(
+      `SELECT 1 FROM pg_available_extensions WHERE name = 'pgmq'`
+    );
+    if (extRows.length === 0) return NextResponse.json({ installed: false, queues: [] });
+
+    const { rows: loadedRows } = await client.query(
       `SELECT 1 FROM pg_extension WHERE extname = 'pgmq'`
     );
-    const installed = extRows.length > 0;
-    if (!installed) return NextResponse.json({ installed: false, queues: [] });
+    if (loadedRows.length === 0) return NextResponse.json({ installed: false, queues: [] });
 
     const prefix = queuePrefix(projectId);
     const { rows: queues } = await client.query(

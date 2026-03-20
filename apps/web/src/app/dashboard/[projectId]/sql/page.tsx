@@ -270,7 +270,12 @@ export default function SqlEditorPage({
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full overflow-hidden bg-zinc-950">
+    <div className="flex flex-col h-full overflow-hidden bg-zinc-950">
+      {/* Page header */}
+      <div className="flex items-center px-6 h-14 border-b border-zinc-800 shrink-0">
+        <h1 className="text-sm font-semibold text-white">SQL Editor</h1>
+      </div>
+      <div className="flex flex-1 overflow-hidden">
       {/* ── Left Sidebar ── */}
       <aside className="w-[180px] shrink-0 border-r border-zinc-800 flex flex-col bg-zinc-950">
         {/* Search */}
@@ -664,6 +669,7 @@ export default function SqlEditorPage({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
