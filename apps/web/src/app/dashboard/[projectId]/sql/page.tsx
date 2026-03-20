@@ -104,7 +104,32 @@ export default function SqlEditorPage({
   // Copied state for export
   const [exported, setExported] = useState(false);
 
+  // Resizable results panel
+  const [resultsHeight, setResultsHeight] = useState(260);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
+
   const result = results[activeId] ?? null;
+
+  // ─── Resizable divider ─────────────────────────────────────────────────────
+
+  const onDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startH: resultsHeight };
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current || !mainRef.current) return;
+      const delta = dragRef.current.startY - ev.clientY;
+      const maxH = mainRef.current.clientHeight - 80;
+      setResultsHeight(Math.min(maxH, Math.max(80, dragRef.current.startH + delta)));
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [resultsHeight]);
 
   // Load saved queries from localStorage
   useEffect(() => {
@@ -345,9 +370,9 @@ export default function SqlEditorPage({
       </aside>
 
       {/* ── Main ── */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div ref={mainRef} className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Tab bar */}
-        <div className="flex items-center border-b border-zinc-800 bg-zinc-950 shrink-0 overflow-x-auto">
+        <div className="flex items-center border-b border-zinc-800 bg-zinc-950 shrink-0 overflow-x-auto h-14">
           {tabs.map((t) => (
             <div
               key={t.id}
@@ -393,7 +418,8 @@ export default function SqlEditorPage({
               lineNumbers: "on",
               glyphMargin: false,
               folding: false,
-              lineDecorationsWidth: 0,
+              lineDecorationsWidth: 16,
+              lineNumbersMinChars: 3,
               overviewRulerLanes: 0,
               hideCursorInOverviewRuler: true,
               renderLineHighlight: "line",
@@ -405,15 +431,21 @@ export default function SqlEditorPage({
             onMount={(editor) => {
               editor.addCommand(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (window as any).monaco?.KeyMod?.CtrlCmd | (window as any).monaco?.KeyCode?.Enter ?? 2048 | 3,
+                ((window as any).monaco?.KeyMod?.CtrlCmd ?? 2048) | ((window as any).monaco?.KeyCode?.Enter ?? 3),
                 () => runQuery()
               );
             }}
           />
         </div>
 
+        {/* ── Drag divider ── */}
+        <div
+          onMouseDown={onDividerMouseDown}
+          className="h-1 shrink-0 cursor-row-resize bg-zinc-800 hover:bg-brand-500 transition-colors"
+        />
+
         {/* ── Results panel ── */}
-        <div className="h-[260px] shrink-0 border-t border-zinc-800 flex flex-col bg-zinc-950">
+        <div style={{ height: resultsHeight }} className="shrink-0 flex flex-col bg-zinc-950">
           {/* Results toolbar */}
           <div className="flex items-center justify-between px-4 py-1.5 border-b border-zinc-800 shrink-0">
             {/* Left: tabs */}

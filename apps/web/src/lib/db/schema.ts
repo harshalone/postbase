@@ -175,6 +175,31 @@ export const storageObjects = postbaseSchema.table(
   })
 );
 
+// ─── External storage connections ─────────────────────────────────────────────
+
+export const storageConnections = postbaseSchema.table(
+  "storage_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    provider: text("provider").notNull(), // 's3' | 'r2' | 'gcs' | 'backblaze'
+    bucket: text("bucket").notNull(),
+    region: text("region"),
+    endpoint: text("endpoint"), // custom endpoint for R2/Backblaze/MinIO
+    accessKeyId: text("access_key_id").notNull(),
+    secretAccessKey: text("secret_access_key").notNull(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    projectIdx: index("storage_connections_project_idx").on(t.projectId),
+  })
+);
+
 // ─── Audit logs ───────────────────────────────────────────────────────────────
 
 export const auditLogs = postbaseSchema.table(
@@ -214,6 +239,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   sessions: many(sessions),
   providerConfigs: many(providerConfigs),
   storageBuckets: many(storageBuckets),
+  storageConnections: many(storageConnections),
   auditLogs: many(auditLogs),
 }));
 

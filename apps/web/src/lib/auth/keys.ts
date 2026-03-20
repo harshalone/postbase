@@ -9,11 +9,11 @@ import { eq } from "drizzle-orm";
  * service role keys: pb_service_<random>
  */
 export function generateAnonKey(): string {
-  return `pb_anon_${nanoid(32)}`;
+  return `pb_anon_${nanoid(64)}`;
 }
 
 export function generateServiceRoleKey(): string {
-  return `pb_service_${nanoid(32)}`;
+  return `pb_service_${nanoid(64)}`;
 }
 
 /**

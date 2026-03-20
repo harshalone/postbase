@@ -3,10 +3,8 @@
 import { useState, useEffect, useCallback, use } from "react";
 import {
   Table2,
-  Terminal,
   Shield,
   Plus,
-  Play,
   Trash2,
   RefreshCw,
   ChevronLeft,
@@ -40,14 +38,6 @@ type TableMeta = {
   columns: Column[];
 };
 
-type SqlResult = {
-  rows: Record<string, unknown>[];
-  fields: { name: string }[];
-  rowCount: number | null;
-  command: string;
-  error?: string;
-};
-
 type Policy = {
   tablename: string;
   policyname: string;
@@ -60,7 +50,7 @@ type Policy = {
 
 type RlsTable = { tablename: string; rls_enabled: boolean };
 
-type Tab = "tables" | "sql" | "rls";
+type Tab = "tables" | "rls";
 
 // ─── RLS Templates ────────────────────────────────────────────────────────────
 
@@ -171,9 +161,6 @@ export default function DatabasePage({
   const [createMoreCol, setCreateMoreCol] = useState(false);
 
   // SQL editor state
-  const [sql, setSql] = useState("SELECT * FROM your_table LIMIT 50;");
-  const [sqlResult, setSqlResult] = useState<SqlResult | null>(null);
-  const [sqlRunning, setSqlRunning] = useState(false);
 
   // RLS state
   const [policies, setPolicies] = useState<Policy[]>([]);
@@ -306,23 +293,6 @@ export default function DatabasePage({
   }
 
   // ─── SQL runner ─────────────────────────────────────────────────────────────
-
-  async function runSql() {
-    if (!sql.trim()) return;
-    setSqlRunning(true);
-    setSqlResult(null);
-    try {
-      const res = await fetch(`/api/dashboard/${projectId}/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql }),
-      });
-      const data = await res.json();
-      setSqlResult(data);
-    } finally {
-      setSqlRunning(false);
-    }
-  }
 
   // ─── Create table ────────────────────────────────────────────────────────────
 
@@ -458,11 +428,10 @@ export default function DatabasePage({
   return (
     <div className="flex flex-col h-full">
       {/* Tabs */}
-      <div className="flex gap-1 px-4 py-2 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-1 px-4 h-14 border-b border-zinc-800 shrink-0">
         {(
           [
             { id: "tables", label: "Tables", icon: Table2 },
-            { id: "sql", label: "SQL Editor", icon: Terminal },
             { id: "rls", label: "RLS Policies", icon: Shield },
           ] as const
         ).map(({ id, label, icon: Icon }) => (
@@ -779,107 +748,6 @@ export default function DatabasePage({
         )}
 
         {/* ── SQL Editor Tab ── */}
-        {tab === "sql" && (
-          <div className="flex flex-col h-full p-6 gap-4">
-            {/* Editor */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-                <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-                  Query
-                </span>
-                <button
-                  onClick={runSql}
-                  disabled={sqlRunning}
-                  className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium transition-colors"
-                >
-                  <Play size={12} />
-                  {sqlRunning ? "Running…" : "Run"}
-                </button>
-              </div>
-              <textarea
-                value={sql}
-                onChange={(e) => setSql(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    runSql();
-                  }
-                }}
-                placeholder="SELECT * FROM your_table LIMIT 50;"
-                className="w-full bg-transparent resize-none px-4 py-3 text-sm font-mono text-zinc-200 placeholder-zinc-700 h-40 focus:outline-none"
-                spellCheck={false}
-              />
-              <div className="px-4 py-1.5 border-t border-zinc-800 text-xs text-zinc-700">
-                ⌘ + Enter to run
-              </div>
-            </div>
-
-            {/* Results */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900 flex-1 flex flex-col overflow-hidden min-h-0">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
-                <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-                  Results
-                </span>
-                {sqlResult && !sqlResult.error && (
-                  <span className="text-xs text-zinc-600">
-                    {sqlResult.command} · {sqlResult.rowCount ?? sqlResult.rows.length} rows
-                  </span>
-                )}
-              </div>
-
-              {!sqlResult ? (
-                <div className="flex-1 flex items-center justify-center text-zinc-700 text-sm">
-                  Run a query to see results
-                </div>
-              ) : sqlResult.error ? (
-                <div className="flex-1 p-4">
-                  <p className="text-red-400 text-sm font-mono">{sqlResult.error}</p>
-                </div>
-              ) : sqlResult.rows.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center text-zinc-600 text-sm">
-                  Query returned no rows · Command: {sqlResult.command}
-                </div>
-              ) : (
-                <div className="flex-1 overflow-auto">
-                  <table className="w-full text-xs border-collapse">
-                    <thead className="sticky top-0 bg-zinc-900">
-                      <tr>
-                        {sqlResult.fields.map((f) => (
-                          <th
-                            key={f.name}
-                            className="text-left px-4 py-2 text-zinc-500 font-medium border-b border-zinc-800 whitespace-nowrap"
-                          >
-                            {f.name}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sqlResult.rows.map((row, i) => (
-                        <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                          {sqlResult!.fields.map((f) => (
-                            <td
-                              key={f.name}
-                              className="px-4 py-2 text-zinc-300 max-w-xs truncate"
-                              title={String(row[f.name] ?? "")}
-                            >
-                              {row[f.name] === null ? (
-                                <span className="text-zinc-700">NULL</span>
-                              ) : (
-                                String(row[f.name])
-                              )}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* ── RLS Policies Tab ── */}
         {tab === "rls" && (
           <div className="flex h-full overflow-hidden">

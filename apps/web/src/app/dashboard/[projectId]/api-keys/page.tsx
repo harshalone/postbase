@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { CopyButton } from "./copy-button";
+import { KeyRow } from "./key-row";
 
 export default async function ApiKeysPage({
   params,
@@ -32,15 +32,19 @@ export default async function ApiKeysPage({
 
         <div className="space-y-4">
           <KeyRow
+            projectId={projectId}
             label="Anon Key"
             description="Safe to use in the browser. Respects Row Level Security."
-            value={project.anonKey}
+            initialValue={project.anonKey}
+            type="anon"
             badge="public"
           />
           <KeyRow
+            projectId={projectId}
             label="Service Role Key"
             description="Server-side only. Bypasses RLS. Keep this secret."
-            value={project.serviceRoleKey}
+            initialValue={project.serviceRoleKey}
+            type="service_role"
             badge="secret"
           />
         </div>
@@ -56,42 +60,6 @@ const postbase = createClient(
 )`}
           </pre>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function KeyRow({
-  label,
-  description,
-  value,
-  badge,
-}: {
-  label: string;
-  description: string;
-  value: string;
-  badge: "public" | "secret";
-}) {
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-sm font-medium text-zinc-200">{label}</span>
-        <span
-          className={`text-xs px-2 py-0.5 rounded-full ${
-            badge === "public"
-              ? "bg-brand-900 text-brand-400"
-              : "bg-red-950 text-red-400"
-          }`}
-        >
-          {badge}
-        </span>
-      </div>
-      <p className="text-xs text-zinc-500 mb-2">{description}</p>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-xs text-zinc-300 font-mono truncate">
-          {value}
-        </code>
-        <CopyButton value={value} />
       </div>
     </div>
   );
