@@ -169,10 +169,19 @@ export async function buildAuthConfig(
     providers: providerInstances,
     session: { strategy: "jwt" },
     callbacks: {
-      async jwt({ token, user }) {
+      async jwt({ token, user, account }) {
         if (user) {
+          // Only store the minimal fields needed — never store OAuth tokens
           token.id = user.id;
           token.projectId = projectId;
+        }
+        // Drop access/refresh tokens from the JWT to prevent cookie bloat (HTTP 431)
+        delete token.access_token;
+        delete token.refresh_token;
+        delete token.id_token;
+        if (account) {
+          // Store the provider name only, not the tokens
+          token.provider = account.provider;
         }
         return token;
       },

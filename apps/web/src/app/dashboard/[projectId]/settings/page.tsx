@@ -3,6 +3,7 @@ import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { PageHeader } from "../_components/page-header";
+import { GeneralSettingsForm } from "./general-settings-form";
 
 export default async function SettingsPage({
   params,
@@ -25,51 +26,11 @@ export default async function SettingsPage({
       <div className="p-6 overflow-auto">
         <div className="max-w-2xl">
           {/* General */}
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 mb-6">
-            <h2 className="font-semibold text-white mb-4">General</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1.5">
-                  Project Name
-                </label>
-                <input
-                  disabled
-                  defaultValue={project.name}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-sm text-zinc-300 cursor-not-allowed"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1.5">
-                  Project Slug
-                </label>
-                <input
-                  disabled
-                  defaultValue={project.slug}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-sm text-zinc-300 cursor-not-allowed font-mono"
-                />
-                <p className="text-xs text-zinc-500 mt-1">Used in API URLs and SDK config.</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1.5">
-                  Project ID
-                </label>
-                <input
-                  disabled
-                  defaultValue={project.id}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-sm text-zinc-500 cursor-not-allowed font-mono"
-                />
-                <p className="text-xs text-zinc-500 mt-1">Read-only. Used internally.</p>
-              </div>
-              <div className="pt-2">
-                <button
-                  disabled
-                  className="cursor-not-allowed px-4 py-2 rounded-lg bg-brand-500 text-white text-sm font-medium opacity-50"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </div>
-          </section>
+          <GeneralSettingsForm
+            projectId={project.id}
+            initialName={project.name}
+            slug={project.slug}
+          />
 
           {/* Auth Settings */}
           <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 mb-6">
@@ -118,9 +79,6 @@ export default async function SettingsPage({
             </div>
           </section>
 
-          <p className="text-xs text-zinc-600 mt-4 text-center">
-            Editable settings coming soon.
-          </p>
         </div>
       </div>
     </div>

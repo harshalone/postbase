@@ -4,6 +4,7 @@ import { organisations, projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { CreateOrgDialog } from "../create-org-dialog";
 import { CreateProjectDialog } from "../create-project-dialog";
+import { EditOrgDialog } from "../edit-org-dialog";
 
 export default async function DashboardPage() {
   const allOrgs = await db.select().from(organisations).orderBy(organisations.createdAt);
@@ -48,7 +49,10 @@ export default async function DashboardPage() {
                 <h2 className="text-lg font-semibold text-white">{org.name}</h2>
                 <p className="text-xs text-zinc-500 mt-0.5">{org.slug}</p>
               </div>
-              <CreateProjectDialog organisationId={org.id} />
+              <div className="flex items-center gap-2">
+                <EditOrgDialog orgId={org.id} currentName={org.name} />
+                <CreateProjectDialog organisationId={org.id} />
+              </div>
             </div>
 
             {ps.length === 0 ? (
