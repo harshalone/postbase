@@ -1,6 +1,6 @@
 {
   "name": "postbasejs",
-  "version": "0.1.2",
+  "version": "0.2.2",
   "description": "The official JavaScript client for Postbase — self-hosted backend as a service",
   "keywords": ["postbase", "database", "auth", "storage", "backend", "self-hosted", "postgresql", "baas"],
   "homepage": "https://www.getpostbase.com",
