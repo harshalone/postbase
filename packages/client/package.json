@@ -1,8 +1,18 @@
 {
   "name": "postbasejs",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "The official JavaScript client for Postbase — self-hosted backend as a service",
-  "keywords": ["postbase", "database", "auth", "storage", "backend"],
+  "keywords": ["postbase", "database", "auth", "storage", "backend", "self-hosted", "postgresql", "baas"],
+  "homepage": "https://www.getpostbase.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harshalone/postbase"
+  },
+  "bugs": {
+    "url": "https://github.com/harshalone/postbase/issues"
+  },
+  "license": "MIT",
+  "author": "Postbase",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",

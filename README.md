@@ -10,6 +10,55 @@ Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="images/1.png" alt="Postbase landing" width="100%" />
+  <br/><em>Self-hosted auth + database platform for Next.js</em>
+</p>
+
+<p align="center">
+  <img src="images/2.png" alt="Dashboard" width="100%" />
+  <br/><em>Dashboard — manage organisations and projects</em>
+</p>
+
+<p align="center">
+  <img src="images/3.png" alt="Project overview" width="100%" />
+  <br/><em>Project overview with quick-start guide</em>
+</p>
+
+<p align="center">
+  <img src="images/4.png" alt="Auth providers" width="100%" />
+  <br/><em>25+ auth providers — toggle any from the dashboard</em>
+</p>
+
+<p align="center">
+  <img src="images/5.png" alt="SQL editor" width="100%" />
+  <br/><em>Built-in SQL editor with AI query generation</em>
+</p>
+
+<p align="center">
+  <img src="images/6.png" alt="Storage connections" width="100%" />
+  <br/><em>S3-compatible storage — connect Amazon S3, Cloudflare R2, Backblaze B2, and more</em>
+</p>
+
+<p align="center">
+  <img src="images/7.png" alt="Cron jobs" width="100%" />
+  <br/><em>Scheduled cron jobs — run SQL snippets or HTTP requests on any schedule</em>
+</p>
+
+<p align="center">
+  <img src="images/8.png" alt="API keys" width="100%" />
+  <br/><em>API keys — anon and service role keys with SDK snippet</em>
+</p>
+
+<p align="center">
+  <img src="images/9.png" alt="Project settings" width="100%" />
+  <br/><em>Project settings — configure auth redirect URLs, JWT expiry, and more</em>
+</p>
+
+---
+
 ## Features
 
 - **25+ Auth Providers** — Google, GitHub, Discord, Magic Link, Passkeys, SMS OTP, SAML/SSO, and more — all toggleable from the dashboard
