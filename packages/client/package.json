@@ -1,19 +1,27 @@
 {
-  "name": "@postbase/client",
+  "name": "postbasejs",
   "version": "0.1.0",
+  "description": "The official JavaScript client for Postbase — self-hosted backend as a service",
+  "keywords": ["postbase", "database", "auth", "storage", "backend"],
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
+    },
+    "./ssr": {
+      "types": "./dist/ssr/index.d.ts",
+      "import": "./dist/ssr/index.mjs",
+      "require": "./dist/ssr/index.js"
     }
   },
+  "files": ["dist"],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch"
+    "build": "tsup",
+    "dev": "tsup --watch"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

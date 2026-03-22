@@ -1,2 +1,24 @@
 export { createClient } from "./client";
-export type { PostbaseClient, QueryBuilder, AuthClient, StorageClient } from "./types";
+export type {
+  PostbaseClient,
+  PostbaseClientOptions,
+  QueryBuilder,
+  QueryResult,
+  SingleResult,
+  AuthClient,
+  AuthAdminClient,
+  AuthResponse,
+  AuthUser,
+  AuthChangeEvent,
+  Session,
+  StorageClient,
+  StorageBucketClient,
+  StorageObject,
+  Bucket,
+  RealtimeChannel,
+  RealtimePayload,
+  RealtimeEvent,
+  Filter,
+  FilterOperator,
+  CookieAdapter,
+} from "./types";

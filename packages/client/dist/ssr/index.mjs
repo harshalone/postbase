@@ -895,7 +895,25 @@ function createClient(url, key, options) {
     }
   };
 }
+
+// src/ssr/index.ts
+function createServerClient(url, key, options) {
+  return createClient(url, key, { ...options, cookies: options.cookies });
+}
+function createBrowserClient(url, key, options) {
+  return createClient(url, key, {
+    ...options,
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      ...options?.auth
+    }
+  });
+}
 export {
-  createClient
+  createBrowserClient,
+  createClient,
+  createServerClient
 };
 //# sourceMappingURL=index.mjs.map

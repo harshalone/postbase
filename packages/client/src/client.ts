@@ -1,52 +1,151 @@
 import type {
   PostbaseClient,
+  PostbaseClientOptions,
   QueryBuilder,
   QueryResult,
   SingleResult,
   AuthClient,
+  AuthAdminClient,
+  AuthResponse,
+  AuthUser,
+  Session,
+  AuthChangeEvent,
   StorageClient,
   StorageBucketClient,
-  Session,
-  AuthUser,
+  StorageObject,
+  Bucket,
+  RpcOptions,
+  RealtimeChannel,
+  RealtimePayload,
+  RealtimeEvent,
   Filter,
   FilterOperator,
+  SelectOptions,
+  InsertBuilder,
+  UpdateBuilder,
+  DeleteBuilder,
+  CookieAdapter,
 } from "./types";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const SESSION_STORAGE_KEY = "postbase_session";
+
+function getStorageKey(options?: PostbaseClientOptions): string {
+  return options?.auth?.storageKey ?? SESSION_STORAGE_KEY;
+}
+
+function isBrowser(): boolean {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
 // ─── Query Builder ────────────────────────────────────────────────────────────
 
+interface QueryState<T> {
+  baseUrl: string;
+  apiKey: string;
+  table: string;
+  columns: string;
+  selectOptions: SelectOptions;
+  filters: Filter[];
+  orFilters: string[];
+  notFilters: Array<{ column: string; operator: string; value: unknown }>;
+  orderBy: Array<{ column: string; ascending?: boolean; nullsFirst?: boolean }>;
+  _limit?: number;
+  _offset?: number;
+  _range?: { from: number; to: number };
+  operation: "select" | "insert" | "update" | "delete" | "upsert";
+  insertData?: Partial<T> | Partial<T>[];
+  upsertOnConflict?: string;
+  updateData?: Partial<T>;
+  returning?: string;
+  customHeaders?: Record<string, string>;
+  cookieAdapter?: CookieAdapter;
+}
+
+async function executeQuery<T>(state: QueryState<T>): Promise<QueryResult<T>> {
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.apiKey}`,
+      ...state.customHeaders,
+    };
+
+    // Forward session cookie as bearer token if using SSR cookie adapter
+    if (state.cookieAdapter) {
+      const cookies = await state.cookieAdapter.getAll();
+      const sessionCookie = cookies.find((c) => c.name.startsWith("postbase-session") || c.name === "next-auth.session-token" || c.name === "__Secure-next-auth.session-token");
+      if (sessionCookie) {
+        headers["X-Postbase-Session"] = sessionCookie.value;
+      }
+    }
+
+    const body: Record<string, unknown> = {
+      operation: state.operation === "upsert" ? "upsert" : state.operation,
+      table: state.table,
+    };
+
+    if (state.operation === "select") {
+      if (state.columns && state.columns !== "*") {
+        body.columns = state.columns.split(",").map((c) => c.trim());
+      }
+      body.count = state.selectOptions.count;
+      body.head = state.selectOptions.head;
+    }
+
+    if (["select", "update", "delete"].includes(state.operation)) {
+      const filters: Filter[] = [...state.filters];
+      if (filters.length) body.filters = filters;
+      if (state.orFilters.length) body.orFilters = state.orFilters;
+      if (state.notFilters.length) body.notFilters = state.notFilters;
+    }
+
+    if (state.operation === "insert" || state.operation === "upsert") {
+      body.data = state.insertData;
+      if (state.upsertOnConflict) body.onConflict = state.upsertOnConflict;
+    }
+
+    if (state.operation === "update") {
+      body.data = state.updateData;
+    }
+
+    if (state.orderBy.length) body.order = state.orderBy;
+    if (state._limit !== undefined) body.limit = state._limit;
+    if (state._offset !== undefined) body.offset = state._offset;
+    if (state._range) body.range = state._range;
+    if (state.returning) body.returning = state.returning;
+
+    const res = await fetch(`${state.baseUrl}/api/db/query`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    const json = await res.json();
+    if (!res.ok) return { data: null, count: null, error: json.error ?? "Query failed" };
+    return { data: json.data, count: json.count ?? null, error: null };
+  } catch (err) {
+    return { data: null, count: null, error: String(err) };
+  }
+}
+
 class QueryBuilderImpl<T> implements QueryBuilder<T> {
-  private _columns: string[] = [];
-  private _filters: Filter[] = [];
-  private _order?: { column: string; ascending?: boolean };
-  private _limit?: number;
-  private _offset?: number;
+  private state: QueryState<T>;
 
-  constructor(
-    private baseUrl: string,
-    private apiKey: string,
-    private table: string
-  ) {}
-
-  private clone(): QueryBuilderImpl<T> {
-    const q = new QueryBuilderImpl<T>(this.baseUrl, this.apiKey, this.table);
-    q._columns = [...this._columns];
-    q._filters = [...this._filters];
-    q._order = this._order;
-    q._limit = this._limit;
-    q._offset = this._offset;
-    return q;
+  constructor(state: QueryState<T>) {
+    this.state = state;
   }
 
-  select(...columns: string[]): QueryBuilder<T> {
-    const q = this.clone();
-    q._columns = columns;
-    return q;
+  private clone(patch: Partial<QueryState<T>>): QueryBuilderImpl<T> {
+    return new QueryBuilderImpl<T>({ ...this.state, ...patch });
   }
 
-  private addFilter(column: string, operator: FilterOperator, value: unknown): QueryBuilder<T> {
-    const q = this.clone();
-    q._filters = [...q._filters, { column, operator, value }];
-    return q;
+  select(columns = "*", options: SelectOptions = {}): QueryBuilderImpl<T> {
+    return this.clone({ columns, selectOptions: options, operation: "select" });
+  }
+
+  private addFilter(column: string, operator: FilterOperator, value: unknown): QueryBuilderImpl<T> {
+    return this.clone({ filters: [...this.state.filters, { column, operator, value }] });
   }
 
   eq(column: string, value: unknown) { return this.addFilter(column, "eq", value); }
@@ -56,290 +155,554 @@ class QueryBuilderImpl<T> implements QueryBuilder<T> {
   lt(column: string, value: unknown) { return this.addFilter(column, "lt", value); }
   lte(column: string, value: unknown) { return this.addFilter(column, "lte", value); }
   like(column: string, pattern: string) { return this.addFilter(column, "like", pattern); }
+  ilike(column: string, pattern: string) { return this.addFilter(column, "ilike", pattern); }
   in(column: string, values: unknown[]) { return this.addFilter(column, "in", values); }
-  is(column: string, value: null | "not null") { return this.addFilter(column, "is", value); }
-
-  order(column: string, options?: { ascending?: boolean }): QueryBuilder<T> {
-    const q = this.clone();
-    q._order = { column, ascending: options?.ascending };
-    return q;
+  is(column: string, value: null | boolean) { return this.addFilter(column, "is", value); }
+  contains(column: string, value: unknown) { return this.addFilter(column, "contains", value); }
+  overlaps(column: string, value: unknown[]) { return this.addFilter(column, "overlaps", value); }
+  textSearch(column: string, query: string, options?: { config?: string }) {
+    return this.addFilter(column, "textSearch", { query, config: options?.config });
   }
 
-  limit(count: number): QueryBuilder<T> {
-    const q = this.clone();
-    q._limit = count;
-    return q;
+  or(filters: string): QueryBuilderImpl<T> {
+    return this.clone({ orFilters: [...this.state.orFilters, filters] });
   }
 
-  offset(count: number): QueryBuilder<T> {
-    const q = this.clone();
-    q._offset = count;
-    return q;
+  not(column: string, operator: string, value: unknown): QueryBuilderImpl<T> {
+    return this.clone({ notFilters: [...this.state.notFilters, { column, operator, value }] });
   }
 
-  private async executeSelect(): Promise<QueryResult<T>> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/db/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          operation: "select",
-          table: this.table,
-          columns: this._columns.length > 0 ? this._columns : undefined,
-          filters: this._filters.length > 0 ? this._filters : undefined,
-          order: this._order,
-          limit: this._limit,
-          offset: this._offset,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) return { data: null, count: null, error: json.error ?? "Query failed" };
-      return { data: json.data, count: json.count, error: null };
-    } catch (err) {
-      return { data: null, count: null, error: String(err) };
-    }
+  order(column: string, options?: { ascending?: boolean; nullsFirst?: boolean }): QueryBuilderImpl<T> {
+    return this.clone({
+      orderBy: [...this.state.orderBy, { column, ascending: options?.ascending, nullsFirst: options?.nullsFirst }],
+    });
   }
 
-  // Make the builder thenable so you can `await postbase.from('x').eq('id', 1)`
+  limit(count: number): QueryBuilderImpl<T> {
+    return this.clone({ _limit: count });
+  }
+
+  offset(count: number): QueryBuilderImpl<T> {
+    return this.clone({ _offset: count });
+  }
+
+  range(from: number, to: number): QueryBuilderImpl<T> {
+    return this.clone({ _range: { from, to }, _limit: to - from + 1, _offset: from });
+  }
+
+  insert(data: Partial<T> | Partial<T>[], options?: { returning?: string }): InsertBuilderImpl<T> {
+    return new InsertBuilderImpl<T>({
+      ...this.state,
+      operation: "insert",
+      insertData: data,
+      returning: options?.returning ?? "*",
+    });
+  }
+
+  upsert(data: Partial<T> | Partial<T>[], options?: { onConflict?: string; returning?: string }): InsertBuilderImpl<T> {
+    return new InsertBuilderImpl<T>({
+      ...this.state,
+      operation: "upsert",
+      insertData: data,
+      upsertOnConflict: options?.onConflict,
+      returning: options?.returning ?? "*",
+    });
+  }
+
+  update(data: Partial<T>): UpdateBuilderImpl<T> {
+    return new UpdateBuilderImpl<T>({
+      ...this.state,
+      operation: "update",
+      updateData: data,
+      returning: "*",
+    });
+  }
+
+  delete(): DeleteBuilderImpl<T> {
+    return new DeleteBuilderImpl<T>({
+      ...this.state,
+      operation: "delete",
+      returning: "*",
+    });
+  }
+
+  async single(): Promise<SingleResult<T>> {
+    const result = await executeQuery<T>(this.clone({ _limit: 1 }).state);
+    if (result.error) return { data: null, error: result.error };
+    const rows = result.data ?? [];
+    if (rows.length === 0) return { data: null, error: "No rows returned" };
+    if (rows.length > 1) return { data: null, error: "Multiple rows returned" };
+    return { data: rows[0], error: null };
+  }
+
+  async maybeSingle(): Promise<SingleResult<T>> {
+    const result = await executeQuery<T>(this.clone({ _limit: 1 }).state);
+    if (result.error) return { data: null, error: result.error };
+    const rows = result.data ?? [];
+    return { data: rows[0] ?? null, error: null };
+  }
+
+  // Thenable — make the builder awaitable directly
   get then() {
-    return this.executeSelect().then.bind(this.executeSelect());
-  }
-
-  insert(data: Partial<T>) {
-    return new InsertBuilderImpl<T>(this.baseUrl, this.apiKey, this.table, data);
-  }
-
-  update(data: Partial<T>) {
-    return new UpdateBuilderImpl<T>(this.baseUrl, this.apiKey, this.table, data, this._filters);
-  }
-
-  delete() {
-    return new DeleteBuilderImpl<T>(this.baseUrl, this.apiKey, this.table, this._filters);
+    const promise = executeQuery<T>(this.state);
+    return promise.then.bind(promise);
   }
 }
 
 class InsertBuilderImpl<T> {
-  constructor(
-    private baseUrl: string,
-    private apiKey: string,
-    private table: string,
-    private data: Partial<T>
-  ) {}
+  private state: QueryState<T>;
 
-  async returning(...columns: string[]): Promise<QueryResult<T>> {
-    return this.execute(columns);
+  constructor(state: QueryState<T>) {
+    this.state = state;
   }
 
-  private async execute(returning?: string[]): Promise<QueryResult<T>> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/db/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          operation: "insert",
-          table: this.table,
-          data: this.data,
-          returning,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) return { data: null, count: null, error: json.error ?? "Insert failed" };
-      return { data: json.data, count: json.count, error: null };
-    } catch (err) {
-      return { data: null, count: null, error: String(err) };
-    }
+  select(columns = "*"): InsertBuilderImpl<T> {
+    return new InsertBuilderImpl<T>({ ...this.state, returning: columns });
   }
 
-  get then() { return this.execute().then.bind(this.execute()); }
+  async single(): Promise<SingleResult<T>> {
+    const result = await executeQuery<T>(this.state);
+    if (result.error) return { data: null, error: result.error };
+    const rows = result.data ?? [];
+    return { data: rows[0] ?? null, error: null };
+  }
+
+  get then() {
+    const promise = executeQuery<T>(this.state);
+    return promise.then.bind(promise);
+  }
 }
 
 class UpdateBuilderImpl<T> {
-  private _filters: Filter[];
+  private state: QueryState<T>;
 
-  constructor(
-    private baseUrl: string,
-    private apiKey: string,
-    private table: string,
-    private data: Partial<T>,
-    filters: Filter[]
-  ) {
-    this._filters = [...filters];
+  constructor(state: QueryState<T>) {
+    this.state = state;
   }
 
-  eq(column: string, value: unknown): UpdateBuilderImpl<T> {
-    const u = new UpdateBuilderImpl<T>(this.baseUrl, this.apiKey, this.table, this.data, this._filters);
-    u._filters = [...this._filters, { column, operator: "eq", value }];
-    return u;
+  private addFilter(column: string, operator: FilterOperator, value: unknown): UpdateBuilderImpl<T> {
+    return new UpdateBuilderImpl<T>({ ...this.state, filters: [...this.state.filters, { column, operator, value }] });
   }
 
-  async returning(...columns: string[]): Promise<QueryResult<T>> {
-    return this.execute(columns);
+  eq(column: string, value: unknown) { return this.addFilter(column, "eq", value); }
+  neq(column: string, value: unknown) { return this.addFilter(column, "neq", value); }
+  gt(column: string, value: unknown) { return this.addFilter(column, "gt", value); }
+  gte(column: string, value: unknown) { return this.addFilter(column, "gte", value); }
+  lt(column: string, value: unknown) { return this.addFilter(column, "lt", value); }
+  lte(column: string, value: unknown) { return this.addFilter(column, "lte", value); }
+  in(column: string, values: unknown[]) { return this.addFilter(column, "in", values); }
+
+  select(columns = "*"): UpdateBuilderImpl<T> {
+    return new UpdateBuilderImpl<T>({ ...this.state, returning: columns });
   }
 
-  private async execute(returning?: string[]): Promise<QueryResult<T>> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/db/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          operation: "update",
-          table: this.table,
-          data: this.data,
-          filters: this._filters,
-          returning,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) return { data: null, count: null, error: json.error ?? "Update failed" };
-      return { data: json.data, count: json.count, error: null };
-    } catch (err) {
-      return { data: null, count: null, error: String(err) };
-    }
+  async single(): Promise<SingleResult<T>> {
+    const result = await executeQuery<T>(this.state);
+    if (result.error) return { data: null, error: result.error };
+    const rows = result.data ?? [];
+    return { data: rows[0] ?? null, error: null };
   }
 
-  get then() { return this.execute().then.bind(this.execute()); }
+  get then() {
+    const promise = executeQuery<T>(this.state);
+    return promise.then.bind(promise);
+  }
 }
 
 class DeleteBuilderImpl<T> {
-  private _filters: Filter[];
+  private state: QueryState<T>;
 
-  constructor(
-    private baseUrl: string,
-    private apiKey: string,
-    private table: string,
-    filters: Filter[]
-  ) {
-    this._filters = [...filters];
+  constructor(state: QueryState<T>) {
+    this.state = state;
   }
 
-  eq(column: string, value: unknown): DeleteBuilderImpl<T> {
-    const d = new DeleteBuilderImpl<T>(this.baseUrl, this.apiKey, this.table, this._filters);
-    d._filters = [...this._filters, { column, operator: "eq", value }];
-    return d;
+  private addFilter(column: string, operator: FilterOperator, value: unknown): DeleteBuilderImpl<T> {
+    return new DeleteBuilderImpl<T>({ ...this.state, filters: [...this.state.filters, { column, operator, value }] });
   }
 
-  async returning(...columns: string[]): Promise<QueryResult<T>> {
-    return this.execute(columns);
+  eq(column: string, value: unknown) { return this.addFilter(column, "eq", value); }
+  neq(column: string, value: unknown) { return this.addFilter(column, "neq", value); }
+  gt(column: string, value: unknown) { return this.addFilter(column, "gt", value); }
+  gte(column: string, value: unknown) { return this.addFilter(column, "gte", value); }
+  lt(column: string, value: unknown) { return this.addFilter(column, "lt", value); }
+  lte(column: string, value: unknown) { return this.addFilter(column, "lte", value); }
+  in(column: string, values: unknown[]) { return this.addFilter(column, "in", values); }
+
+  select(columns = "*"): DeleteBuilderImpl<T> {
+    return new DeleteBuilderImpl<T>({ ...this.state, returning: columns });
   }
 
-  private async execute(returning?: string[]): Promise<QueryResult<T>> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/db/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          operation: "delete",
-          table: this.table,
-          filters: this._filters,
-          returning,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) return { data: null, count: null, error: json.error ?? "Delete failed" };
-      return { data: json.data, count: json.count, error: null };
-    } catch (err) {
-      return { data: null, count: null, error: String(err) };
-    }
+  async single(): Promise<SingleResult<T>> {
+    const result = await executeQuery<T>(this.state);
+    if (result.error) return { data: null, error: result.error };
+    const rows = result.data ?? [];
+    return { data: rows[0] ?? null, error: null };
   }
 
-  get then() { return this.execute().then.bind(this.execute()); }
+  get then() {
+    const promise = executeQuery<T>(this.state);
+    return promise.then.bind(promise);
+  }
 }
 
 // ─── Auth Client ──────────────────────────────────────────────────────────────
 
-function createAuthClient(baseUrl: string, apiKey: string): AuthClient {
-  const listeners: Array<(session: Session | null) => void> = [];
+function createAuthAdmin(baseUrl: string, apiKey: string, customHeaders?: Record<string, string>): AuthAdminClient {
+  const headers = () => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+    ...customHeaders,
+  });
 
   return {
-    async signIn(provider, options) {
-      if (typeof window === "undefined") return;
-      const callbackUrl = options?.callbackUrl ?? window.location.href;
-      window.location.href = `${baseUrl}/api/auth/signin/${provider}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
-    },
-
-    async signOut(options) {
-      if (typeof window === "undefined") return;
-      const callbackUrl = options?.callbackUrl ?? window.location.href;
-      await fetch(`${baseUrl}/api/auth/signout`, { method: "POST" });
-      listeners.forEach((fn) => fn(null));
-      window.location.href = callbackUrl;
-    },
-
-    async signUp(email, password): Promise<SingleResult<AuthUser>> {
+    async listUsers(options) {
       try {
-        const res = await fetch(`${baseUrl}/api/auth/signup`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ email, password }),
-        });
+        const url = new URL(`${baseUrl}/api/auth/v1/admin/users`);
+        if (options?.page) url.searchParams.set("page", String(options.page));
+        if (options?.perPage) url.searchParams.set("perPage", String(options.perPage));
+        const res = await fetch(url.toString(), { headers: headers() });
         const json = await res.json();
-        if (!res.ok) return { data: null, error: json.error ?? "Sign up failed" };
-        return { data: json.user, error: null };
+        if (!res.ok) return { data: null, error: json.error ?? "Failed to list users" };
+        return { data: { users: json.users, total: json.total }, error: null };
       } catch (err) {
         return { data: null, error: String(err) };
       }
     },
 
-    async getSession(): Promise<Session | null> {
+    async getUserById(id) {
       try {
-        const res = await fetch(`${baseUrl}/api/auth/session`);
-        if (!res.ok) return null;
+        const res = await fetch(`${baseUrl}/api/auth/v1/admin/users/${id}`, { headers: headers() });
         const json = await res.json();
-        return json?.user ? json : null;
-      } catch {
-        return null;
+        if (!res.ok) return { data: { user: null }, error: json.error ?? "User not found" };
+        return { data: { user: json.user }, error: null };
+      } catch (err) {
+        return { data: { user: null }, error: String(err) };
+      }
+    },
+
+    async createUser(options) {
+      try {
+        const res = await fetch(`${baseUrl}/api/auth/v1/admin/users`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify(options),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: { user: null }, error: json.error ?? "Failed to create user" };
+        return { data: { user: json.user }, error: null };
+      } catch (err) {
+        return { data: { user: null }, error: String(err) };
+      }
+    },
+
+    async updateUserById(id, attributes) {
+      try {
+        const res = await fetch(`${baseUrl}/api/auth/v1/admin/users/${id}`, {
+          method: "PATCH",
+          headers: headers(),
+          body: JSON.stringify(attributes),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: { user: null }, error: json.error ?? "Failed to update user" };
+        return { data: { user: json.user }, error: null };
+      } catch (err) {
+        return { data: { user: null }, error: String(err) };
+      }
+    },
+
+    async deleteUser(id) {
+      try {
+        const res = await fetch(`${baseUrl}/api/auth/v1/admin/users/${id}`, {
+          method: "DELETE",
+          headers: headers(),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: null, error: json.error ?? "Failed to delete user" };
+        return { data: null, error: null };
+      } catch (err) {
+        return { data: null, error: String(err) };
+      }
+    },
+  };
+}
+
+function createAuthClient(
+  baseUrl: string,
+  apiKey: string,
+  options?: PostbaseClientOptions,
+  cookieAdapter?: CookieAdapter
+): AuthClient {
+  const storageKey = getStorageKey(options);
+  const listeners: Array<(event: AuthChangeEvent, session: Session | null) => void> = [];
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let currentSession: Session | null = null;
+
+  const customHeaders = options?.global?.headers;
+
+  const headers = () => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+    ...customHeaders,
+  });
+
+  function persistSession(session: Session | null): void {
+    if (!isBrowser()) return;
+    if (options?.auth?.persistSession === false) return;
+    if (session) {
+      localStorage.setItem(storageKey, JSON.stringify(session));
+    } else {
+      localStorage.removeItem(storageKey);
+    }
+  }
+
+  function loadPersistedSession(): Session | null {
+    if (!isBrowser()) return null;
+    if (options?.auth?.persistSession === false) return null;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return null;
+      const session = JSON.parse(raw) as Session;
+      // Check expiry
+      if (session.expiresAt && Date.now() / 1000 > session.expiresAt) return null;
+      return session;
+    } catch {
+      return null;
+    }
+  }
+
+  function scheduleRefresh(session: Session): void {
+    if (!isBrowser()) return;
+    if (options?.auth?.autoRefreshToken === false) return;
+    if (refreshTimer) clearTimeout(refreshTimer);
+    const expiresIn = session.expiresAt - Date.now() / 1000;
+    const refreshIn = Math.max((expiresIn - 60) * 1000, 0); // 1 minute before expiry
+    refreshTimer = setTimeout(async () => {
+      if (session.refreshToken) {
+        const result = await authClient.refreshSession(session.refreshToken);
+        if (!result.error && result.data.session) {
+          notifyListeners("TOKEN_REFRESHED", result.data.session);
+        }
+      }
+    }, refreshIn);
+  }
+
+  function notifyListeners(event: AuthChangeEvent, session: Session | null): void {
+    currentSession = session;
+    persistSession(session);
+    if (session) scheduleRefresh(session);
+    listeners.forEach((fn) => fn(event, session));
+  }
+
+  const authClient: AuthClient = {
+    async signUp({ email, password, options: signUpOptions }) {
+      try {
+        const res = await fetch(`${baseUrl}/api/auth/v1/signup`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ email, password, data: signUpOptions?.data }),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: { user: null, session: null }, error: json.error ?? "Sign up failed" };
+        const session: Session | null = json.session ?? null;
+        const user: AuthUser | null = json.user ?? null;
+        if (session) notifyListeners("SIGNED_IN", session);
+        return { data: { user, session }, error: null };
+      } catch (err) {
+        return { data: { user: null, session: null }, error: String(err) };
+      }
+    },
+
+    async signInWithPassword({ email, password }) {
+      try {
+        const res = await fetch(`${baseUrl}/api/auth/v1/token`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ email, password, grant_type: "password" }),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: { user: null, session: null }, error: json.error ?? "Sign in failed" };
+        const session: Session = json.session;
+        const user: AuthUser = json.user;
+        notifyListeners("SIGNED_IN", session);
+        return { data: { user, session }, error: null };
+      } catch (err) {
+        return { data: { user: null, session: null }, error: String(err) };
+      }
+    },
+
+    async signInWithOtp({ email, options: otpOptions }) {
+      try {
+        const res = await fetch(`${baseUrl}/api/auth/v1/otp`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ email, redirectTo: otpOptions?.redirectTo }),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: null, error: json.error ?? "OTP send failed" };
+        return { data: null, error: null };
+      } catch (err) {
+        return { data: null, error: String(err) };
+      }
+    },
+
+    async signInWithOAuth({ provider, options: oauthOptions }) {
+      if (!isBrowser()) return;
+      const redirectTo = oauthOptions?.redirectTo ?? window.location.href;
+      const url = new URL(`${baseUrl}/api/auth/${provider}`);
+      url.searchParams.set("redirectTo", redirectTo);
+      if (oauthOptions?.scopes) url.searchParams.set("scopes", oauthOptions.scopes);
+      window.location.href = url.toString();
+    },
+
+    async signOut() {
+      try {
+        const session = currentSession ?? loadPersistedSession();
+        await fetch(`${baseUrl}/api/auth/v1/logout`, {
+          method: "POST",
+          headers: {
+            ...headers(),
+            ...(session ? { "X-Postbase-Token": session.accessToken } : {}),
+          },
+        });
+        if (refreshTimer) clearTimeout(refreshTimer);
+        notifyListeners("SIGNED_OUT", null);
+        return { error: null };
+      } catch (err) {
+        return { error: String(err) };
+      }
+    },
+
+    async getSession() {
+      try {
+        // SSR: read from cookie adapter
+        if (cookieAdapter) {
+          const cookies = await cookieAdapter.getAll();
+          const sessionCookie = cookies.find((c) =>
+            c.name.startsWith("postbase-session") ||
+            c.name === "next-auth.session-token" ||
+            c.name === "__Secure-next-auth.session-token"
+          );
+          if (!sessionCookie) return { data: { session: null }, error: null };
+          // Validate via server
+          const res = await fetch(`${baseUrl}/api/auth/v1/session`, {
+            headers: { ...headers(), "X-Postbase-Session": sessionCookie.value },
+          });
+          if (!res.ok) return { data: { session: null }, error: null };
+          const json = await res.json();
+          return { data: { session: json.session ?? null }, error: null };
+        }
+
+        // Browser: check localStorage
+        if (isBrowser()) {
+          const persisted = loadPersistedSession();
+          if (persisted) {
+            currentSession = persisted;
+            return { data: { session: persisted }, error: null };
+          }
+        }
+
+        // Fall back to server check
+        const res = await fetch(`${baseUrl}/api/auth/v1/session`, { headers: headers() });
+        if (!res.ok) return { data: { session: null }, error: null };
+        const json = await res.json();
+        return { data: { session: json.session ?? null }, error: null };
+      } catch (err) {
+        return { data: { session: null }, error: String(err) };
+      }
+    },
+
+    async getUser(jwt?: string) {
+      try {
+        const token = jwt ?? currentSession?.accessToken ?? loadPersistedSession()?.accessToken;
+        const res = await fetch(`${baseUrl}/api/auth/v1/user`, {
+          headers: {
+            ...headers(),
+            ...(token ? { "X-Postbase-Token": token } : {}),
+          },
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: { user: null }, error: json.error ?? "Failed to get user" };
+        return { data: { user: json.user }, error: null };
+      } catch (err) {
+        return { data: { user: null }, error: String(err) };
+      }
+    },
+
+    async refreshSession(refreshToken?: string) {
+      try {
+        const token = refreshToken ?? currentSession?.refreshToken ?? loadPersistedSession()?.refreshToken;
+        const res = await fetch(`${baseUrl}/api/auth/v1/token`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ refresh_token: token, grant_type: "refresh_token" }),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: { user: null, session: null }, error: json.error ?? "Refresh failed" };
+        const session: Session = json.session;
+        const user: AuthUser = json.user;
+        notifyListeners("TOKEN_REFRESHED", session);
+        return { data: { user, session }, error: null };
+      } catch (err) {
+        return { data: { user: null, session: null }, error: String(err) };
       }
     },
 
     onAuthStateChange(callback) {
       listeners.push(callback);
-      // Poll session every 30s (replace with SSE/websocket for realtime)
-      const interval = setInterval(async () => {
-        const session = await this.getSession();
-        callback(session);
-      }, 30_000);
-      return () => {
-        const idx = listeners.indexOf(callback);
-        if (idx > -1) listeners.splice(idx, 1);
-        clearInterval(interval);
+
+      // Emit current session immediately
+      const session = currentSession ?? loadPersistedSession();
+      if (session) {
+        setTimeout(() => callback("SIGNED_IN", session), 0);
+        currentSession = session;
+        scheduleRefresh(session);
+      }
+
+      return {
+        data: {
+          subscription: {
+            unsubscribe() {
+              const idx = listeners.indexOf(callback);
+              if (idx > -1) listeners.splice(idx, 1);
+            },
+          },
+        },
       };
     },
+
+    admin: createAuthAdmin(baseUrl, apiKey, customHeaders),
   };
+
+  return authClient;
 }
 
 // ─── Storage Client ───────────────────────────────────────────────────────────
 
-function createStorageClient(baseUrl: string, apiKey: string): StorageClient {
-  const headers = { Authorization: `Bearer ${apiKey}` };
+function createStorageClient(
+  baseUrl: string,
+  apiKey: string,
+  options?: PostbaseClientOptions
+): StorageClient {
+  const customHeaders = options?.global?.headers;
+  const headers = () => ({ Authorization: `Bearer ${apiKey}`, ...customHeaders });
 
   function bucketClient(bucket: string): StorageBucketClient {
     return {
-      async upload(path, file, options) {
+      async upload(path, file, uploadOptions) {
         try {
           const form = new FormData();
           form.append("file", file as Blob);
           form.append("path", path);
-          if (options?.upsert) form.append("upsert", "true");
-          const res = await fetch(`${baseUrl}/api/storage/${bucket}/upload`, {
-            method: "POST",
-            headers,
+          if (uploadOptions?.upsert) form.append("upsert", "true");
+          if (uploadOptions?.cacheControl) form.append("cacheControl", uploadOptions.cacheControl);
+          const res = await fetch(`${baseUrl}/api/storage/v1/object/${bucket}/${encodeURIComponent(path)}`, {
+            method: uploadOptions?.upsert ? "PUT" : "POST",
+            headers: headers(),
             body: form,
           });
           const json = await res.json();
           if (!res.ok) return { data: null, error: json.error ?? "Upload failed" };
-          return { data: { path }, error: null };
+          return { data: { path, fullPath: `${bucket}/${path}` }, error: null };
         } catch (err) {
           return { data: null, error: String(err) };
         }
@@ -347,10 +710,9 @@ function createStorageClient(baseUrl: string, apiKey: string): StorageClient {
 
       async download(path) {
         try {
-          const res = await fetch(
-            `${baseUrl}/api/storage/${bucket}/object/${encodeURIComponent(path)}`,
-            { headers }
-          );
+          const res = await fetch(`${baseUrl}/api/storage/v1/object/${bucket}/${encodeURIComponent(path)}`, {
+            headers: headers(),
+          });
           if (!res.ok) return { data: null, error: "Download failed" };
           return { data: await res.blob(), error: null };
         } catch (err) {
@@ -360,34 +722,88 @@ function createStorageClient(baseUrl: string, apiKey: string): StorageClient {
 
       async remove(paths) {
         try {
-          const res = await fetch(`${baseUrl}/api/storage/${bucket}/objects`, {
+          const res = await fetch(`${baseUrl}/api/storage/v1/object/${bucket}`, {
             method: "DELETE",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ paths }),
+            headers: { ...headers(), "Content-Type": "application/json" },
+            body: JSON.stringify({ prefixes: paths }),
           });
           const json = await res.json();
           if (!res.ok) return { data: null, count: null, error: json.error ?? "Delete failed" };
-          return { data: json.data, count: json.count, error: null };
+          return { data: json.data, count: json.data?.length ?? null, error: null };
         } catch (err) {
           return { data: null, count: null, error: String(err) };
         }
       },
 
-      async list(prefix) {
+      async list(prefix, listOptions) {
         try {
-          const url = new URL(`${baseUrl}/api/storage/${bucket}/list`);
-          if (prefix) url.searchParams.set("prefix", prefix);
-          const res = await fetch(url.toString(), { headers });
+          const res = await fetch(`${baseUrl}/api/storage/v1/object/list/${bucket}`, {
+            method: "POST",
+            headers: { ...headers(), "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prefix: prefix ?? "",
+              limit: listOptions?.limit ?? 100,
+              offset: listOptions?.offset ?? 0,
+              sortBy: listOptions?.sortBy,
+            }),
+          });
           const json = await res.json();
           if (!res.ok) return { data: null, count: null, error: json.error ?? "List failed" };
-          return { data: json.data, count: json.count, error: null };
+          return { data: json.data, count: json.data?.length ?? null, error: null };
         } catch (err) {
           return { data: null, count: null, error: String(err) };
         }
       },
 
       getPublicUrl(path) {
-        return `${baseUrl}/api/storage/${bucket}/public/${encodeURIComponent(path)}`;
+        return {
+          data: { publicUrl: `${baseUrl}/api/storage/v1/object/public/${bucket}/${encodeURIComponent(path)}` },
+        };
+      },
+
+      async createSignedUrl(path, expiresIn) {
+        try {
+          const res = await fetch(`${baseUrl}/api/storage/v1/object/sign/${bucket}/${encodeURIComponent(path)}`, {
+            method: "POST",
+            headers: { ...headers(), "Content-Type": "application/json" },
+            body: JSON.stringify({ expiresIn }),
+          });
+          const json = await res.json();
+          if (!res.ok) return { data: null, error: json.error ?? "Sign failed" };
+          return { data: { signedUrl: `${baseUrl}${json.signedUrl}` }, error: null };
+        } catch (err) {
+          return { data: null, error: String(err) };
+        }
+      },
+
+      async move(fromPath, toPath) {
+        try {
+          const res = await fetch(`${baseUrl}/api/storage/v1/object/move`, {
+            method: "POST",
+            headers: { ...headers(), "Content-Type": "application/json" },
+            body: JSON.stringify({ bucketId: bucket, sourceKey: fromPath, destinationKey: toPath }),
+          });
+          const json = await res.json();
+          if (!res.ok) return { error: json.error ?? "Move failed" };
+          return { error: null };
+        } catch (err) {
+          return { error: String(err) };
+        }
+      },
+
+      async copy(fromPath, toPath) {
+        try {
+          const res = await fetch(`${baseUrl}/api/storage/v1/object/copy`, {
+            method: "POST",
+            headers: { ...headers(), "Content-Type": "application/json" },
+            body: JSON.stringify({ bucketId: bucket, sourceKey: fromPath, destinationKey: toPath }),
+          });
+          const json = await res.json();
+          if (!res.ok) return { data: null, error: json.error ?? "Copy failed" };
+          return { data: { path: toPath }, error: null };
+        } catch (err) {
+          return { data: null, error: String(err) };
+        }
       },
     };
   }
@@ -395,16 +811,33 @@ function createStorageClient(baseUrl: string, apiKey: string): StorageClient {
   return {
     from: bucketClient,
 
-    async createBucket(name, options) {
+    async createBucket(name, bucketOptions) {
       try {
-        const res = await fetch(`${baseUrl}/api/storage/buckets`, {
+        const res = await fetch(`${baseUrl}/api/storage/v1/bucket`, {
           method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ name, public: options?.public ?? false }),
+          headers: { ...headers(), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            id: name,
+            public: bucketOptions?.public ?? false,
+            file_size_limit: bucketOptions?.fileSizeLimit,
+            allowed_mime_types: bucketOptions?.allowedMimeTypes,
+          }),
         });
         const json = await res.json();
-        if (!res.ok) return { data: null, error: json.error ?? "Create failed" };
-        return { data: { name }, error: null };
+        if (!res.ok) return { data: null, error: json.error ?? "Create bucket failed" };
+        return { data: json.data, error: null };
+      } catch (err) {
+        return { data: null, error: String(err) };
+      }
+    },
+
+    async getBucket(id) {
+      try {
+        const res = await fetch(`${baseUrl}/api/storage/v1/bucket/${id}`, { headers: headers() });
+        const json = await res.json();
+        if (!res.ok) return { data: null, error: json.error ?? "Get bucket failed" };
+        return { data: json.data, error: null };
       } catch (err) {
         return { data: null, error: String(err) };
       }
@@ -412,29 +845,214 @@ function createStorageClient(baseUrl: string, apiKey: string): StorageClient {
 
     async listBuckets() {
       try {
-        const res = await fetch(`${baseUrl}/api/storage/buckets`, { headers });
+        const res = await fetch(`${baseUrl}/api/storage/v1/bucket`, { headers: headers() });
         const json = await res.json();
-        if (!res.ok) return { data: null, count: null, error: json.error ?? "List failed" };
-        return { data: json.data, count: json.count, error: null };
+        if (!res.ok) return { data: null, count: null, error: json.error ?? "List buckets failed" };
+        return { data: json.data, count: json.data?.length ?? null, error: null };
       } catch (err) {
         return { data: null, count: null, error: String(err) };
+      }
+    },
+
+    async updateBucket(id, bucketOptions) {
+      try {
+        const res = await fetch(`${baseUrl}/api/storage/v1/bucket/${id}`, {
+          method: "PUT",
+          headers: { ...headers(), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            public: bucketOptions.public,
+            file_size_limit: bucketOptions.fileSizeLimit,
+            allowed_mime_types: bucketOptions.allowedMimeTypes,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: null, error: json.error ?? "Update bucket failed" };
+        return { data: json.data, error: null };
+      } catch (err) {
+        return { data: null, error: String(err) };
+      }
+    },
+
+    async deleteBucket(id) {
+      try {
+        const res = await fetch(`${baseUrl}/api/storage/v1/bucket/${id}`, {
+          method: "DELETE",
+          headers: headers(),
+        });
+        const json = await res.json();
+        if (!res.ok) return { error: json.error ?? "Delete bucket failed" };
+        return { error: null };
+      } catch (err) {
+        return { error: String(err) };
+      }
+    },
+
+    async emptyBucket(id) {
+      try {
+        const res = await fetch(`${baseUrl}/api/storage/v1/bucket/${id}/empty`, {
+          method: "POST",
+          headers: headers(),
+        });
+        const json = await res.json();
+        if (!res.ok) return { error: json.error ?? "Empty bucket failed" };
+        return { error: null };
+      } catch (err) {
+        return { error: String(err) };
       }
     },
   };
 }
 
+// ─── Realtime ─────────────────────────────────────────────────────────────────
+
+class RealtimeChannelImpl implements RealtimeChannel {
+  private handlers: Array<{ event: RealtimeEvent; callback: (payload: RealtimePayload) => void }> = [];
+  private ws: WebSocket | null = null;
+  private statusCallback?: (status: "SUBSCRIBED" | "CLOSED" | "CHANNEL_ERROR") => void;
+
+  constructor(
+    private baseUrl: string,
+    private apiKey: string,
+    private channelName: string
+  ) {}
+
+  on<T = Record<string, unknown>>(
+    event: RealtimeEvent,
+    callback: (payload: RealtimePayload<T>) => void
+  ): RealtimeChannel {
+    this.handlers.push({ event, callback: callback as (p: RealtimePayload) => void });
+    return this;
+  }
+
+  subscribe(callback?: (status: "SUBSCRIBED" | "CLOSED" | "CHANNEL_ERROR") => void): RealtimeChannel {
+    if (typeof window === "undefined") return this;
+    this.statusCallback = callback;
+
+    const wsUrl = this.baseUrl.replace(/^http/, "ws");
+    try {
+      this.ws = new WebSocket(`${wsUrl}/api/realtime?channel=${encodeURIComponent(this.channelName)}&apikey=${this.apiKey}`);
+
+      this.ws.onopen = () => {
+        this.statusCallback?.("SUBSCRIBED");
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as RealtimePayload;
+          this.handlers.forEach(({ event: eventType, callback }) => {
+            if (eventType === "*" || eventType === payload.eventType) {
+              callback(payload);
+            }
+          });
+        } catch {
+          // ignore malformed messages
+        }
+      };
+
+      this.ws.onerror = () => {
+        this.statusCallback?.("CHANNEL_ERROR");
+      };
+
+      this.ws.onclose = () => {
+        this.statusCallback?.("CLOSED");
+      };
+    } catch {
+      this.statusCallback?.("CHANNEL_ERROR");
+    }
+
+    return this;
+  }
+
+  unsubscribe(): void {
+    this.ws?.close();
+    this.ws = null;
+  }
+}
+
 // ─── Main factory ─────────────────────────────────────────────────────────────
 
-export function createClient(url: string, key: string): PostbaseClient {
+const channels = new Set<RealtimeChannelImpl>();
+
+export function createClient(
+  url: string,
+  key: string,
+  options?: PostbaseClientOptions
+): PostbaseClient {
   const baseUrl = url.replace(/\/$/, "");
+  const cookieAdapter = options?.cookies;
+
+  const makeQueryState = <T>(table: string): QueryState<T> => ({
+    baseUrl,
+    apiKey: key,
+    table,
+    columns: "*",
+    selectOptions: {},
+    filters: [],
+    orFilters: [],
+    notFilters: [],
+    orderBy: [],
+    operation: "select",
+    customHeaders: options?.global?.headers,
+    cookieAdapter,
+  });
 
   return {
     url: baseUrl,
     key,
-    auth: createAuthClient(baseUrl, key),
+    auth: createAuthClient(baseUrl, key, options, cookieAdapter),
+    storage: createStorageClient(baseUrl, key, options),
+
     from<T = Record<string, unknown>>(table: string): QueryBuilder<T> {
-      return new QueryBuilderImpl<T>(baseUrl, key, table);
+      return new QueryBuilderImpl<T>(makeQueryState<T>(table)) as unknown as QueryBuilder<T>;
     },
-    storage: createStorageClient(baseUrl, key),
+
+    async rpc<T = Record<string, unknown>>(
+      fn: string,
+      args?: Record<string, unknown>,
+      rpcOptions?: RpcOptions
+    ): Promise<QueryResult<T>> {
+      try {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+          ...options?.global?.headers,
+        };
+        if (cookieAdapter) {
+          const cookies = await cookieAdapter.getAll();
+          const sessionCookie = cookies.find((c) =>
+            c.name.startsWith("postbase-session") ||
+            c.name === "next-auth.session-token" ||
+            c.name === "__Secure-next-auth.session-token"
+          );
+          if (sessionCookie) headers["X-Postbase-Session"] = sessionCookie.value;
+        }
+        const res = await fetch(`${baseUrl}/api/rpc/${fn}`, {
+          method: rpcOptions?.head ? "HEAD" : "POST",
+          headers,
+          body: JSON.stringify({ args: args ?? {}, count: rpcOptions?.count }),
+        });
+        const json = await res.json();
+        if (!res.ok) return { data: null, count: null, error: json.error ?? "RPC failed" };
+        return { data: json.data, count: json.count ?? null, error: null };
+      } catch (err) {
+        return { data: null, count: null, error: String(err) };
+      }
+    },
+
+    channel(name: string): RealtimeChannel {
+      const ch = new RealtimeChannelImpl(baseUrl, key, name);
+      channels.add(ch);
+      return ch;
+    },
+
+    removeChannel(channel: RealtimeChannel): void {
+      channel.unsubscribe();
+      channels.delete(channel as RealtimeChannelImpl);
+    },
+
+    removeAllChannels(): void {
+      channels.forEach((ch) => ch.unsubscribe());
+      channels.clear();
+    },
   };
 }

@@ -1,3 +1,31 @@
+"use strict";
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// src/ssr/index.ts
+var ssr_exports = {};
+__export(ssr_exports, {
+  createBrowserClient: () => createBrowserClient,
+  createClient: () => createClient,
+  createServerClient: () => createServerClient
+});
+module.exports = __toCommonJS(ssr_exports);
+
 // src/client.ts
 var SESSION_STORAGE_KEY = "postbase_session";
 function getStorageKey(options) {
@@ -895,7 +923,26 @@ function createClient(url, key, options) {
     }
   };
 }
-export {
-  createClient
-};
-//# sourceMappingURL=index.mjs.map
+
+// src/ssr/index.ts
+function createServerClient(url, key, options) {
+  return createClient(url, key, { ...options, cookies: options.cookies });
+}
+function createBrowserClient(url, key, options) {
+  return createClient(url, key, {
+    ...options,
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      ...options?.auth
+    }
+  });
+}
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  createBrowserClient,
+  createClient,
+  createServerClient
+});
+//# sourceMappingURL=index.js.map

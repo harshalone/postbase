@@ -31,6 +31,7 @@
     "next": "^16.1.6",
     "next-auth": "^5.0.0-beta.25",
     "nextjs-toploader": "^3.9.17",
+    "nodemailer": "^7.0.13",
     "pg": "^8.13.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -41,6 +42,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.0.0",
+    "@types/nodemailer": "^7.0.11",
     "@types/pg": "^8.11.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

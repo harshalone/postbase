@@ -4,95 +4,152 @@
  *
  * Headers:
  *   Authorization: Bearer <anon-key | service-role-key>
+ *   X-Postbase-Token: <access-jwt>  (optional — identifies the authenticated user for RLS)
  *   Content-Type: application/json
  *
- * Body:
- *   { table: string, operation: 'select'|'insert'|'update'|'delete', ... }
- *
- * anon key   → enforces RLS (row level security via session user)
+ * anon key   → enforces RLS
  * service key → bypasses RLS, full access
  */
 import { NextRequest } from "next/server";
 import { Pool } from "pg";
 import { validateApiKey } from "@/lib/auth/keys";
+import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
 import { z } from "zod";
+
+const filterOperators = z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "in", "is", "contains", "overlaps", "textSearch"]);
+
+const filterSchema = z.object({
+  column: z.string(),
+  operator: filterOperators,
+  value: z.unknown(),
+});
+
+const orFilterSchema = z.string(); // raw filter string like "name.eq.foo,age.gt.18"
+const notFilterSchema = z.object({ column: z.string(), operator: z.string(), value: z.unknown() });
+
+const baseQueryFields = {
+  table: z.string().min(1),
+  orFilters: z.array(orFilterSchema).optional(),
+  notFilters: z.array(notFilterSchema).optional(),
+  order: z.array(z.object({ column: z.string(), ascending: z.boolean().optional(), nullsFirst: z.boolean().optional() })).optional(),
+  limit: z.number().int().min(1).max(10000).optional(),
+  offset: z.number().int().min(0).optional(),
+  range: z.object({ from: z.number().int(), to: z.number().int() }).optional(),
+};
 
 const querySchema = z.discriminatedUnion("operation", [
   z.object({
     operation: z.literal("select"),
-    table: z.string().min(1),
+    ...baseQueryFields,
     columns: z.array(z.string()).optional(),
-    filters: z.array(z.object({
-      column: z.string(),
-      operator: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "like", "in", "is"]),
-      value: z.unknown(),
-    })).optional(),
-    order: z.object({ column: z.string(), ascending: z.boolean().optional() }).optional(),
-    limit: z.number().int().min(1).max(1000).optional(),
-    offset: z.number().int().min(0).optional(),
+    filters: z.array(filterSchema).optional(),
+    count: z.enum(["exact", "planned", "estimated"]).optional(),
+    head: z.boolean().optional(),
   }),
   z.object({
     operation: z.literal("insert"),
-    table: z.string().min(1),
-    data: z.record(z.unknown()),
-    returning: z.array(z.string()).optional(),
+    ...baseQueryFields,
+    data: z.union([z.record(z.unknown()), z.array(z.record(z.unknown()))]),
+    returning: z.string().optional(),
+  }),
+  z.object({
+    operation: z.literal("upsert"),
+    ...baseQueryFields,
+    data: z.union([z.record(z.unknown()), z.array(z.record(z.unknown()))]),
+    onConflict: z.string().optional(),
+    returning: z.string().optional(),
   }),
   z.object({
     operation: z.literal("update"),
-    table: z.string().min(1),
+    ...baseQueryFields,
     data: z.record(z.unknown()),
-    filters: z.array(z.object({
-      column: z.string(),
-      operator: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "like", "in", "is"]),
-      value: z.unknown(),
-    })).min(1), // require at least one filter for safety
-    returning: z.array(z.string()).optional(),
+    filters: z.array(filterSchema).optional(),
+    returning: z.string().optional(),
   }),
   z.object({
     operation: z.literal("delete"),
-    table: z.string().min(1),
-    filters: z.array(z.object({
-      column: z.string(),
-      operator: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "like", "in", "is"]),
-      value: z.unknown(),
-    })).min(1), // require at least one filter for safety
-    returning: z.array(z.string()).optional(),
+    ...baseQueryFields,
+    filters: z.array(filterSchema).optional(),
+    returning: z.string().optional(),
   }),
 ]);
 
 type QueryInput = z.infer<typeof querySchema>;
-
-function buildWhereClause(
-  filters: NonNullable<Extract<QueryInput, { operation: "select" }>["filters"]>,
-  values: unknown[],
-  startIdx: number
-): string {
-  const parts = filters.map((f) => {
-    const idx = values.length + startIdx;
-    if (f.operator === "in") {
-      const arr = f.value as unknown[];
-      const placeholders = arr.map((_, i) => `$${idx + i}`);
-      values.push(...arr);
-      return `"${f.column}" IN (${placeholders.join(", ")})`;
-    }
-    if (f.operator === "is") {
-      return `"${f.column}" IS ${f.value === null ? "NULL" : "NOT NULL"}`;
-    }
-    const opMap: Record<string, string> = {
-      eq: "=", neq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=", like: "LIKE",
-    };
-    values.push(f.value);
-    return `"${f.column}" ${opMap[f.operator]} $${idx}`;
-  });
-  return parts.join(" AND ");
-}
+type Filter = { column: string; operator: string; value: unknown };
 
 function sanitizeIdentifier(name: string): string {
-  // Only allow alphanumeric + underscore + dot (for schema.table)
   if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(name)) {
     throw new Error(`Invalid identifier: ${name}`);
   }
   return name;
+}
+
+function buildFilterClause(filter: Filter, values: unknown[]): string {
+  const col = `"${sanitizeIdentifier(filter.column)}"`;
+
+  switch (filter.operator) {
+    case "in": {
+      const arr = filter.value as unknown[];
+      if (!arr.length) return "FALSE";
+      const placeholders = arr.map(() => { values.push(arr[values.length]); return `$${values.length}`; });
+      // Fix: push all at once
+      values.splice(values.length - arr.length, arr.length);
+      arr.forEach((v) => values.push(v));
+      const phs = arr.map((_, i) => `$${values.length - arr.length + i + 1}`);
+      return `${col} IN (${phs.join(", ")})`;
+    }
+    case "is": {
+      if (filter.value === null) return `${col} IS NULL`;
+      if (filter.value === true) return `${col} IS TRUE`;
+      if (filter.value === false) return `${col} IS FALSE`;
+      return `${col} IS NOT NULL`;
+    }
+    case "contains": {
+      values.push(JSON.stringify(filter.value));
+      return `${col} @> $${values.length}::jsonb`;
+    }
+    case "overlaps": {
+      values.push(filter.value);
+      return `${col} && $${values.length}`;
+    }
+    case "textSearch": {
+      const ts = filter.value as { query: string; config?: string };
+      const config = ts.config ?? "english";
+      values.push(ts.query);
+      return `to_tsvector('${config}', ${col}) @@ plainto_tsquery('${config}', $${values.length})`;
+    }
+    default: {
+      const opMap: Record<string, string> = {
+        eq: "=", neq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=", like: "LIKE", ilike: "ILIKE",
+      };
+      values.push(filter.value);
+      return `${col} ${opMap[filter.operator] ?? "="} $${values.length}`;
+    }
+  }
+}
+
+function buildWhereClause(filters: Filter[], orFilters: string[], notFilters: Array<{ column: string; operator: string; value: unknown }>, values: unknown[]): string {
+  const parts: string[] = [];
+
+  for (const f of filters) {
+    parts.push(buildFilterClause(f, values));
+  }
+
+  for (const notF of notFilters) {
+    parts.push(`NOT (${buildFilterClause(notF, values)})`);
+  }
+
+  // orFilters are strings like "status.eq.active,role.eq.admin"
+  for (const orStr of orFilters) {
+    const orParts = orStr.split(",").map((part) => {
+      const [col, op, ...rest] = part.trim().split(".");
+      const val = rest.join(".");
+      return buildFilterClause({ column: col, operator: op, value: val }, values);
+    });
+    if (orParts.length > 0) parts.push(`(${orParts.join(" OR ")})`);
+  }
+
+  return parts.length > 0 ? `WHERE ${parts.join(" AND ")}` : "";
 }
 
 export async function POST(req: NextRequest) {
@@ -109,9 +166,7 @@ export async function POST(req: NextRequest) {
 
   // 2. Parse + validate body
   let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  try { body = await req.json(); } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
@@ -121,9 +176,22 @@ export async function POST(req: NextRequest) {
   }
   const input = parsed.data;
 
-  // 3. Connect to postgres
-  // In multi-project setups, each project could have its own DB URL.
-  // For now we use the main DB and rely on RLS via SET LOCAL role.
+  // 3. Resolve authenticated user JWT for RLS
+  let userId: string | null = null;
+  const sessionToken = req.headers.get("x-postbase-token") ?? req.headers.get("x-postbase-session");
+  if (sessionToken) {
+    try {
+      const secret = getJwtSecret();
+      const payload = await verifyJwt(sessionToken, secret);
+      if (payload && payload.pid === keyInfo.projectId) {
+        userId = payload.sub;
+      }
+    } catch {
+      // ignore — just use anon role
+    }
+  }
+
+  // 4. Connect to postgres
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   const client = await pool.connect();
 
@@ -132,81 +200,114 @@ export async function POST(req: NextRequest) {
     let sql = "";
 
     // Set RLS context
-    if (keyInfo.type === "anon") {
-      // Set the project_id so RLS policies can use it
-      await client.query("SELECT set_config('postbase.project_id', $1, true)", [
-        keyInfo.projectId,
-      ]);
-      await client.query("SELECT set_config('postbase.role', 'anon', true)");
-    } else {
-      await client.query(
-        "SELECT set_config('postbase.project_id', $1, true)",
-        [keyInfo.projectId]
-      );
-      await client.query(
-        "SELECT set_config('postbase.role', 'service_role', true)"
-      );
+    await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
+    await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
+    if (userId) {
+      await client.query("SELECT set_config('postbase.user_id', $1, true)", [userId]);
     }
 
     const table = sanitizeIdentifier(input.table);
+    const orFilters = ("orFilters" in input ? input.orFilters : undefined) ?? [];
+    const notFilters = ("notFilters" in input ? input.notFilters : undefined) ?? [];
+    const filters = ("filters" in input ? input.filters : undefined) ?? [];
+    const orderBy = input.order ?? [];
+    const returning = "returning" in input && input.returning ? input.returning : "*";
 
     switch (input.operation) {
       case "select": {
-        const cols =
-          input.columns?.map((c) => `"${sanitizeIdentifier(c)}"`).join(", ") ??
-          "*";
-        sql = `SELECT ${cols} FROM "${table}"`;
-        if (input.filters?.length) {
-          sql += ` WHERE ${buildWhereClause(input.filters, values, 1)}`;
+        if (input.head) {
+          // COUNT only
+          const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
+          sql = `SELECT COUNT(*) FROM "${table}" ${whereClause}`;
+          const result = await client.query(sql, values);
+          return Response.json({ data: null, count: parseInt(result.rows[0].count, 10) });
         }
-        if (input.order) {
-          const dir = input.order.ascending === false ? "DESC" : "ASC";
-          sql += ` ORDER BY "${sanitizeIdentifier(input.order.column)}" ${dir}`;
+
+        const cols = input.columns?.map((c) => `"${sanitizeIdentifier(c)}"`).join(", ") ?? "*";
+        const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
+
+        if (input.count === "exact") {
+          // Run COUNT alongside
+          const countSql = `SELECT COUNT(*) FROM "${table}" ${whereClause}`;
+          const countResult = await client.query(countSql, values);
+          const total = parseInt(countResult.rows[0].count, 10);
+
+          sql = `SELECT ${cols} FROM "${table}" ${whereClause}`;
+          if (orderBy.length) {
+            sql += " ORDER BY " + orderBy.map(o => `"${sanitizeIdentifier(o.column)}" ${o.ascending === false ? "DESC" : "ASC"}${o.nullsFirst ? " NULLS FIRST" : ""}`).join(", ");
+          }
+          if (input.limit) { values.push(input.limit); sql += ` LIMIT $${values.length}`; }
+          if (input.offset) { values.push(input.offset); sql += ` OFFSET $${values.length}`; }
+
+          const result = await client.query(sql, values);
+          return Response.json({ data: result.rows, count: total });
         }
-        if (input.limit) {
-          values.push(input.limit);
-          sql += ` LIMIT $${values.length}`;
+
+        sql = `SELECT ${cols} FROM "${table}" ${whereClause}`;
+        if (orderBy.length) {
+          sql += " ORDER BY " + orderBy.map(o => `"${sanitizeIdentifier(o.column)}" ${o.ascending === false ? "DESC" : "ASC"}${o.nullsFirst ? " NULLS FIRST" : ""}`).join(", ");
         }
-        if (input.offset) {
-          values.push(input.offset);
-          sql += ` OFFSET $${values.length}`;
-        }
+        if (input.limit) { values.push(input.limit); sql += ` LIMIT $${values.length}`; }
+        if (input.offset) { values.push(input.offset); sql += ` OFFSET $${values.length}`; }
         break;
       }
 
       case "insert": {
-        const keys = Object.keys(input.data).map(sanitizeIdentifier);
-        const vals = Object.values(input.data);
-        const placeholders = vals.map((_, i) => `$${i + 1}`);
-        values.push(...vals);
-        const returning =
-          input.returning?.map((c) => `"${sanitizeIdentifier(c)}"`).join(", ") ??
-          "*";
-        sql = `INSERT INTO "${table}" (${keys.map((k) => `"${k}"`).join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING ${returning}`;
+        const rows = Array.isArray(input.data) ? input.data : [input.data];
+        if (rows.length === 0) return Response.json({ data: [], count: 0 });
+
+        const keys = Object.keys(rows[0]).map(sanitizeIdentifier);
+        const placeholders = rows.map((row, ri) =>
+          `(${Object.values(row).map((_, ci) => { values.push(Object.values(row)[ci]); return `$${values.length}`; }).join(", ")})`
+        );
+
+        // Fix placeholder building
+        values.length = 0;
+        const allPlaceholders = rows.map((row) => {
+          const rowVals = Object.values(row);
+          const phs = rowVals.map((v) => { values.push(v); return `$${values.length}`; });
+          return `(${phs.join(", ")})`;
+        });
+
+        sql = `INSERT INTO "${table}" (${keys.map((k) => `"${k}"`).join(", ")}) VALUES ${allPlaceholders.join(", ")} RETURNING ${returning}`;
+        break;
+      }
+
+      case "upsert": {
+        const rows = Array.isArray(input.data) ? input.data : [input.data];
+        if (rows.length === 0) return Response.json({ data: [], count: 0 });
+
+        const keys = Object.keys(rows[0]).map(sanitizeIdentifier);
+        values.length = 0;
+        const allPlaceholders = rows.map((row) => {
+          const rowVals = Object.values(row);
+          const phs = rowVals.map((v) => { values.push(v); return `$${values.length}`; });
+          return `(${phs.join(", ")})`;
+        });
+
+        const conflict = input.onConflict ? `(${input.onConflict.split(",").map((c) => `"${sanitizeIdentifier(c.trim())}"`).join(", ")})` : "";
+        const updateCols = keys.map((k) => `"${k}" = EXCLUDED."${k}"`).join(", ");
+
+        sql = `INSERT INTO "${table}" (${keys.map((k) => `"${k}"`).join(", ")}) VALUES ${allPlaceholders.join(", ")}`;
+        sql += conflict ? ` ON CONFLICT ${conflict} DO UPDATE SET ${updateCols}` : ` ON CONFLICT DO NOTHING`;
+        sql += ` RETURNING ${returning}`;
         break;
       }
 
       case "update": {
         const keys = Object.keys(input.data).map(sanitizeIdentifier);
         const vals = Object.values(input.data);
+        vals.forEach((v) => values.push(v));
         const setClauses = keys.map((k, i) => `"${k}" = $${i + 1}`);
-        values.push(...vals);
-        sql = `UPDATE "${table}" SET ${setClauses.join(", ")}`;
-        sql += ` WHERE ${buildWhereClause(input.filters, values, values.length + 1)}`;
-        const returning =
-          input.returning?.map((c) => `"${sanitizeIdentifier(c)}"`).join(", ") ??
-          "*";
-        sql += ` RETURNING ${returning}`;
+
+        const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
+        sql = `UPDATE "${table}" SET ${setClauses.join(", ")} ${whereClause} RETURNING ${returning}`;
         break;
       }
 
       case "delete": {
-        sql = `DELETE FROM "${table}"`;
-        sql += ` WHERE ${buildWhereClause(input.filters, values, 1)}`;
-        const returning =
-          input.returning?.map((c) => `"${sanitizeIdentifier(c)}"`).join(", ") ??
-          "*";
-        sql += ` RETURNING ${returning}`;
+        const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
+        sql = `DELETE FROM "${table}" ${whereClause} RETURNING ${returning}`;
         break;
       }
     }
