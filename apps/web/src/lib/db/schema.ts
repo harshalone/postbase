@@ -272,6 +272,17 @@ export const auditLogs = postbaseSchema.table(
   })
 );
 
+// ─── Admin users (dashboard access, not project-scoped) ───────────────────────
+
+export const adminUsers = postbaseSchema.table("admin_users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  mustChangeCredentials: boolean("must_change_credentials").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const organisationsRelations = relations(organisations, ({ many }) => ({

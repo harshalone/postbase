@@ -146,6 +146,12 @@ do_migrate() {
   success "Migrations complete"
 }
 
+do_seed() {
+  divider
+  info "Seeding default admin user..."
+  (cd "$ROOT_DIR" && pnpm db:seed)
+}
+
 do_app() {
   divider
   info "Starting Next.js dev server..."
@@ -184,15 +190,17 @@ check_prereqs
 
 case "$MODE" in
   default)
-    # Start infra → migrate → run app
+    # Start infra → migrate → seed → run app
     do_infra false
     do_migrate
+    do_seed
     do_app
     ;;
   rebuild)
-    # Rebuild postgres image → start infra → migrate → run app
+    # Rebuild postgres image → start infra → migrate → seed → run app
     do_infra true
     do_migrate
+    do_seed
     do_app
     ;;
   infra)
@@ -205,10 +213,11 @@ case "$MODE" in
     do_migrate
     ;;
   reset)
-    # Nuke everything → rebuild → start fresh → migrate → run app
+    # Nuke everything → rebuild → start fresh → migrate → seed → run app
     do_reset
     do_infra false
     do_migrate
+    do_seed
     do_app
     ;;
   down)

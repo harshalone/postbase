@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const {createRequire} = require\\(''module''\\); const r = createRequire\\(import.meta.url || __filename\\); r\\(''pg''\\); console.log\\(''ok''\\)\")",
+      "Bash(node -e \"require\\(''pg''\\); console.log\\(''ok''\\)\")",
+      "Bash(node scripts/seed-admin.mjs)",
+      "Bash(DATABASE_URL=\"postgresql://postbase:postbase@localhost:5432/postbase\" npx drizzle-kit push)",
+      "Bash(psql \"postgresql://postbase:postbase@localhost:5432/postbase\" -c \"\\\\d _postbase.verification_tokens\")",
+      "Bash(node -e \":*)",
+      "Bash(pnpm db:seed)",
+      "Bash(docker compose:*)",
+      "Bash(DATABASE_URL=\"postgresql://postbase:postbase@localhost:5432/postbase\" npx drizzle-kit push --verbose)",
+      "Bash(1:*)",
+      "Bash(npm view:*)",
+      "Bash(pnpm --filter web add drizzle-orm@latest)",
+      "Bash(pnpm --filter web add -D drizzle-kit@latest)",
+      "Bash(DATABASE_URL=\"postgresql://postbase:postbase@localhost:5432/postbase\" pnpm --filter web db:push)"
+    ],
+    "additionalDirectories": [
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]"
+    ]
+  }
+}

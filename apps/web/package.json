@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "NODE_OPTIONS=--max-http-header-size=32768 next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "NODE_OPTIONS=--max-http-header-size=32768 next start",
     "lint": "next lint",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "node scripts/seed-admin.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.7.0",
@@ -24,7 +25,7 @@
     "@tailwindcss/postcss": "^4.2.1",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
-    "drizzle-orm": "^0.38.0",
+    "drizzle-orm": "^0.45.1",
     "lucide-react": "^0.460.0",
     "minio": "^8.0.2",
     "nanoid": "^5.0.0",
@@ -46,7 +47,7 @@
     "@types/pg": "^8.11.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "drizzle-kit": "^0.29.0",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.1.6",
     "postcss": "^8.4.0",

@@ -2,9 +2,9 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { organisations, projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { CreateOrgDialog } from "../create-org-dialog";
-import { CreateProjectDialog } from "../create-project-dialog";
-import { EditOrgDialog } from "../edit-org-dialog";
+import { CreateOrgDialog } from "../../create-org-dialog";
+import { CreateProjectDialog } from "../../create-project-dialog";
+import { EditOrgDialog } from "../../edit-org-dialog";
 
 export default async function DashboardPage() {
   const allOrgs = await db.select().from(organisations).orderBy(organisations.createdAt);
