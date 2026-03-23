@@ -19,6 +19,6 @@
     "db:studio": "pnpm --filter web db:studio"
   },
   "devDependencies": {
-    "turbo": "^2.0.0"
+    "turbo": "^2.8.20"
   }
 }
