@@ -14,10 +14,16 @@
       "Bash(npm view:*)",
       "Bash(pnpm --filter web add drizzle-orm@latest)",
       "Bash(pnpm --filter web add -D drizzle-kit@latest)",
-      "Bash(DATABASE_URL=\"postgresql://postbase:postbase@localhost:5432/postbase\" pnpm --filter web db:push)"
+      "Bash(DATABASE_URL=\"postgresql://postbase:postbase@localhost:5432/postbase\" pnpm --filter web db:push)",
+      "Read(//Volumes/2TB/code/npm-packages/**)",
+      "Bash(cp -r /Volumes/2TB/code/postbase.com/packages/client/. /Volumes/2TB/code/npm-packages/postbasejs/)",
+      "Bash(rm -rf /Volumes/2TB/code/npm-packages/postbasejs/abc)",
+      "Bash(psql \"$DATABASE_URL\" -f drizzle/0001_add_admin_2fa.sql)",
+      "Bash(pnpm tsc:*)"
     ],
     "additionalDirectories": [
-      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]"
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
+      "/Volumes/2TB/code/postbase.com/packages"
     ]
   }
 }

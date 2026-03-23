@@ -32,8 +32,16 @@ function LoginForm() {
     const res = await fetch("/api/auth/admin/session");
     const session = await res.json();
 
-    if (session?.user?.mustChangeCredentials) {
+    const user = session?.user as {
+      mustChangeCredentials?: boolean;
+      totpEnabled?: boolean;
+    } | undefined;
+
+    if (user?.mustChangeCredentials) {
       router.push("/dashboard/setup");
+    } else if (user?.totpEnabled) {
+      const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
+      router.push(`/dashboard/2fa/verify?callbackUrl=${encodeURIComponent(callbackUrl)}`);
     } else {
       const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
       router.push(callbackUrl);

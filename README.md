@@ -90,7 +90,9 @@ openssl rand -base64 32
 ```
 ./dev.sh
 
-./dev.sh --rebuild // is your go-to when you change the Dockerfile
+./dev.sh --rebuild  
+
+./dev.sh --reset
 
 ```
 

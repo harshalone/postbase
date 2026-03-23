@@ -12,11 +12,18 @@ export default async function ProtectedDashboardLayout({
     redirect("/dashboard/login");
   }
 
-  const mustChange = (session.user as { mustChangeCredentials?: boolean })
-    ?.mustChangeCredentials;
+  const user = session.user as {
+    mustChangeCredentials?: boolean;
+    totpEnabled?: boolean;
+    totpVerified?: boolean;
+  };
 
-  if (mustChange) {
+  if (user?.mustChangeCredentials) {
     redirect("/dashboard/setup");
+  }
+
+  if (user?.totpEnabled && !user?.totpVerified) {
+    redirect("/dashboard/2fa/verify");
   }
 
   return <>{children}</>;

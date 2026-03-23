@@ -38,6 +38,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           id: admin.id,
           email: admin.email,
           mustChangeCredentials: admin.mustChangeCredentials,
+          totpEnabled: admin.totpEnabled,
         };
       },
     }),
@@ -47,10 +48,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/dashboard/login",
   },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session: sessionUpdate }) {
       if (user) {
         token.id = user.id;
         token.mustChangeCredentials = (user as { mustChangeCredentials?: boolean }).mustChangeCredentials ?? false;
+        token.totpEnabled = (user as { totpEnabled?: boolean }).totpEnabled ?? false;
+        // totpVerified starts false on every new login; set to true after TOTP verification
+        token.totpVerified = false;
+      }
+      if (trigger === "update" && sessionUpdate?.totpVerified === true) {
+        token.totpVerified = true;
       }
       return token;
     },
@@ -58,6 +65,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.id as string;
         (session.user as { mustChangeCredentials?: boolean }).mustChangeCredentials = token.mustChangeCredentials as boolean;
+        (session.user as { totpEnabled?: boolean }).totpEnabled = token.totpEnabled as boolean;
+        (session.user as { totpVerified?: boolean }).totpVerified = token.totpVerified as boolean;
       }
       return session;
     },
