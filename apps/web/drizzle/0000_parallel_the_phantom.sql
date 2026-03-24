@@ -1,4 +1,4 @@
-CREATE SCHEMA "_postbase";
+CREATE SCHEMA IF NOT EXISTS "_postbase";
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "_postbase"."accounts" (
 	"user_id" uuid NOT NULL,

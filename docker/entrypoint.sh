@@ -15,6 +15,9 @@ export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhos
 mkdir -p /data/postgres
 chown -R postgres:postgres /data/postgres
 
+# Remove stale pid file from previous unclean shutdown (Railway restarts)
+rm -f /data/postgres/postmaster.pid
+
 # Initialise if no PG_VERSION file (fresh or incomplete previous init)
 if [ ! -f /data/postgres/PG_VERSION ]; then
     echo "==> Initialising PostgreSQL data directory..."
