@@ -9,6 +9,7 @@ MINIO_ROOT_USER="${MINIO_ROOT_USER:-postbase}"
 MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-postbase_secret}"
 
 export MINIO_ROOT_USER MINIO_ROOT_PASSWORD
+export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}"
 
 # ── Postgres data dir ─────────────────────────────────────────────────────────
 mkdir -p /data/postgres
@@ -28,7 +29,7 @@ if [ ! -f /data/postgres/PG_VERSION ]; then
     echo "host all all 127.0.0.1/32 md5"        >> /data/postgres/pg_hba.conf
 fi
 
-# Start Postgres temporarily to ensure DB + user exist
+# Start Postgres temporarily for all init work
 gosu postgres /usr/lib/postgresql/18/bin/pg_ctl -D /data/postgres -w start
 
 # Set password (connect via template1 which always exists)
@@ -47,6 +48,23 @@ if [ "$DB_EXISTS" != "1" ]; then
         -f /docker-entrypoint-initdb.d/init.sql
     echo "==> Database initialised."
 fi
+
+# ── Run migrations (idempotent SQL files via psql) ────────────────────────────
+echo "==> Running database migrations..."
+for f in $(ls /app/drizzle/*.sql | sort); do
+    echo "  -> $(basename $f)"
+    gosu postgres psql -v ON_ERROR_STOP=1 \
+        --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+        -f "$f"
+done
+echo "==> Migrations done."
+
+# ── Seed admin user (idempotent) ──────────────────────────────────────────────
+echo "==> Seeding admin user..."
+gosu postgres psql -v ON_ERROR_STOP=1 \
+    --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    -f /docker-entrypoint-initdb.d/seed.sql
+echo "==> Seed done."
 
 gosu postgres /usr/lib/postgresql/18/bin/pg_ctl -D /data/postgres -w stop
 

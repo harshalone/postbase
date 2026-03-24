@@ -24,7 +24,9 @@
       "WebFetch(domain:railway.com)",
       "WebFetch(domain:backboard.railway.app)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:blog.railway.com)"
+      "WebFetch(domain:blog.railway.com)",
+      "Bash(grep -r \"db:migrate\\\\|db:push\\\\|drizzle-kit\" /Volumes/2TB/code/postbase.com --include=*.json --include=*.yaml --include=*.yml -A 2 -B 2)",
+      "Bash(node -e \"const bcrypt = require\\(''/Volumes/2TB/code/postbase.com/node_modules/.pnpm/bcryptjs@2.4.3/node_modules/bcryptjs/index.js''\\); bcrypt.hash\\(''postbase'', 12\\).then\\(h => console.log\\(h\\)\\)\")"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",

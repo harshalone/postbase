@@ -75,6 +75,10 @@ COPY --from=builder /app/apps/web/public ./apps/web/public
 # ── Init SQL ──────────────────────────────────────────────────────────────────
 COPY scripts/init.sql /docker-entrypoint-initdb.d/init.sql
 
+# ── Drizzle migrations + seed ─────────────────────────────────────────────────
+COPY apps/web/drizzle /app/drizzle
+COPY scripts/seed.sql /docker-entrypoint-initdb.d/seed.sql
+
 # ── supervisord config ────────────────────────────────────────────────────────
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 

@@ -152,3 +152,20 @@ Examples (replace `<your-app>` and `<YOUR_PROJECT_ID>`):
 | GitLab | `https://<your-app>.up.railway.app/api/auth/<project-id>/callback/gitlab` |
 
 > Your `project-id` is visible in the Postbase dashboard URL once you create a project.
+
+
+```
+POSTGRES_USER="postbase"
+POSTGRES_PASSWORD="postbase"
+POSTGRES_DB="postbase"
+MINIO_ROOT_USER="postbase"
+MINIO_ROOT_PASSWORD="changeme"
+AUTH_SECRET="postbase"
+NEXTAUTH_URL="https://web-production-75a84.up.railway.app"
+NEXTAUTH_SECRET="${{AUTH_SECRET}}"
+POSTBASE_JWT_SECRET="${{AUTH_SECRET}}"
+DATABASE_URL="postgresql://${{POSTGRES_USER}}:${{POSTGRES_PASSWORD}}@localhost:5432/${{POSTGRES_DB}}"
+MINIO_ENDPOINT="http://localhost:9000"
+MINIO_ACCESS_KEY="${{MINIO_ROOT_USER}}"
+MINIO_SECRET_KEY="${{MINIO_ROOT_PASSWORD}}"
+```
