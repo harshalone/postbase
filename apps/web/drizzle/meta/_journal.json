@@ -8,6 +8,13 @@
       "when": 1774024865736,
       "tag": "0000_parallel_the_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1774376210708,
+      "tag": "0001_stiff_zombie",
+      "breakpoints": true
     }
   ]
 }
