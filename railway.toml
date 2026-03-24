@@ -7,3 +7,12 @@ healthcheckPath = "/"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+
+[variables]
+NEXTAUTH_URL = "https://${{RAILWAY_PUBLIC_DOMAIN}}"
+NEXTAUTH_SECRET = "${{AUTH_SECRET}}"
+POSTBASE_JWT_SECRET = "${{AUTH_SECRET}}"
+MINIO_ENDPOINT = "http://localhost:9000"
+MINIO_ACCESS_KEY = "${{MINIO_ROOT_USER}}"
+MINIO_SECRET_KEY = "${{MINIO_ROOT_PASSWORD}}"
+DATABASE_URL = "postgresql://${{POSTGRES_USER}}:${{POSTGRES_PASSWORD}}@localhost:5432/${{POSTGRES_DB}}"
