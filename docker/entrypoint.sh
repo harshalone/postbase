@@ -31,16 +31,16 @@ fi
 # Start Postgres temporarily to ensure DB + user exist
 gosu postgres /usr/lib/postgresql/18/bin/pg_ctl -D /data/postgres -w start
 
-# Set password (idempotent)
-gosu postgres psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" \
+# Set password (connect via template1 which always exists)
+gosu postgres psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname template1 \
     -c "ALTER USER \"$POSTGRES_USER\" WITH PASSWORD '$POSTGRES_PASSWORD';"
 
 # Create DB if it doesn't exist
-DB_EXISTS=$(gosu postgres psql --username "$POSTGRES_USER" -tAc \
+DB_EXISTS=$(gosu postgres psql --username "$POSTGRES_USER" --dbname template1 -tAc \
     "SELECT 1 FROM pg_database WHERE datname='$POSTGRES_DB'")
 if [ "$DB_EXISTS" != "1" ]; then
     echo "==> Creating database $POSTGRES_DB..."
-    gosu postgres psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" \
+    gosu postgres psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname template1 \
         -c "CREATE DATABASE \"$POSTGRES_DB\" OWNER \"$POSTGRES_USER\";"
     gosu postgres psql -v ON_ERROR_STOP=1 \
         --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
