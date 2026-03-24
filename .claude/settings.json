@@ -19,7 +19,12 @@
       "Bash(cp -r /Volumes/2TB/code/postbase.com/packages/client/. /Volumes/2TB/code/npm-packages/postbasejs/)",
       "Bash(rm -rf /Volumes/2TB/code/npm-packages/postbasejs/abc)",
       "Bash(psql \"$DATABASE_URL\" -f drizzle/0001_add_admin_2fa.sql)",
-      "Bash(pnpm tsc:*)"
+      "Bash(pnpm tsc:*)",
+      "WebFetch(domain:docs.railway.com)",
+      "WebFetch(domain:railway.com)",
+      "WebFetch(domain:backboard.railway.app)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:blog.railway.com)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
