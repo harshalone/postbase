@@ -154,6 +154,7 @@ Examples (replace `<your-app>` and `<YOUR_PROJECT_ID>`):
 > Your `project-id` is visible in the Postbase dashboard URL once you create a project.
 
 
+## Copy this env variables to railway 
 ```
 POSTGRES_USER="postbase"
 POSTGRES_PASSWORD="postbase"
