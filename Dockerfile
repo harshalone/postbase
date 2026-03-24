@@ -55,7 +55,6 @@ RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmo
 # ── Copy compiled extensions from pgbuilder ───────────────────────────────────
 COPY --from=pgbuilder /usr/lib/postgresql/18/lib/pg_cron.so /usr/lib/postgresql/18/lib/
 COPY --from=pgbuilder /usr/share/postgresql/18/extension/pg_cron* /usr/share/postgresql/18/extension/
-COPY --from=pgbuilder /usr/lib/postgresql/18/lib/pgmq.so /usr/lib/postgresql/18/lib/
 COPY --from=pgbuilder /usr/share/postgresql/18/extension/pgmq* /usr/share/postgresql/18/extension/
 
 # ── Node 22 ───────────────────────────────────────────────────────────────────
