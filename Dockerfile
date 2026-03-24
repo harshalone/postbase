@@ -65,9 +65,6 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Data volume — Postgres and MinIO both persist here
-VOLUME ["/data"]
-
 EXPOSE 3000
 
 ENTRYPOINT ["/entrypoint.sh"]
