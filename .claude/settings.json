@@ -27,11 +27,18 @@
       "WebFetch(domain:blog.railway.com)",
       "Bash(grep -r \"db:migrate\\\\|db:push\\\\|drizzle-kit\" /Volumes/2TB/code/postbase.com --include=*.json --include=*.yaml --include=*.yml -A 2 -B 2)",
       "Bash(node -e \"const bcrypt = require\\(''/Volumes/2TB/code/postbase.com/node_modules/.pnpm/bcryptjs@2.4.3/node_modules/bcryptjs/index.js''\\); bcrypt.hash\\(''postbase'', 12\\).then\\(h => console.log\\(h\\)\\)\")",
-      "Bash(DATABASE_URL=\"postgresql://postbase:postbase@localhost:5432/postbase\" pnpm --filter web exec drizzle-kit generate)"
+      "Bash(DATABASE_URL=\"postgresql://postbase:postbase@localhost:5432/postbase\" pnpm --filter web exec drizzle-kit generate)",
+      "Read(//Users/harshallonare/.claude/**)",
+      "Bash(python3 -m json.tool)",
+      "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/auth -type f)",
+      "Bash(ls /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/auth/)",
+      "Bash(npx tsc:*)",
+      "Bash(node_modules/.bin/tsc --noEmit --skipLibCheck)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
-      "/Volumes/2TB/code/postbase.com/packages"
+      "/Volumes/2TB/code/postbase.com/packages",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/auth/providers"
     ]
   }
 }

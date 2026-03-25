@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { OAUTH_PROVIDERS } from "@/lib/auth/providers";
 
 type Provider = (typeof OAUTH_PROVIDERS)[number];
@@ -20,14 +21,13 @@ interface Props {
 
 export function ProviderToggle({ provider, projectId, existing }: Props) {
   const [enabled, setEnabled] = useState(existing?.enabled ?? false);
-  const [expanded, setExpanded] = useState(false);
-  const [clientId, setClientId] = useState(existing?.clientId ?? "");
-  const [clientSecret, setClientSecret] = useState(existing?.clientSecret ?? "");
   const [saving, setSaving] = useState(false);
 
-  const needsCredentials = !["anonymous", "passkey"].includes(provider.id);
+  const configUrl = `/dashboard/${projectId}/auth/providers/${provider.id}`;
 
-  async function save() {
+  async function toggleEnabled() {
+    const next = !enabled;
+    setEnabled(next);
     setSaving(true);
     try {
       await fetch("/api/dashboard/providers", {
@@ -36,14 +36,13 @@ export function ProviderToggle({ provider, projectId, existing }: Props) {
         body: JSON.stringify({
           projectId,
           provider: provider.id,
-          enabled,
-          clientId,
-          clientSecret,
+          enabled: next,
+          clientId: existing?.clientId ?? undefined,
+          clientSecret: existing?.clientSecret ?? undefined,
         }),
       });
     } finally {
       setSaving(false);
-      setExpanded(false);
     }
   }
 
@@ -59,20 +58,19 @@ export function ProviderToggle({ provider, projectId, existing }: Props) {
           )}
         </div>
         <div className="flex items-center gap-3">
-          {needsCredentials && (
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Configure
-            </button>
-          )}
+          <Link
+            href={configUrl}
+            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            Configure
+          </Link>
           {/* Toggle switch */}
           <button
             role="switch"
             aria-checked={enabled}
-            onClick={() => setEnabled(!enabled)}
-            className={`cursor-pointer relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+            onClick={toggleEnabled}
+            disabled={saving}
+            className={`cursor-pointer relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-60 ${
               enabled ? "bg-brand-600" : "bg-zinc-700"
             }`}
           >
@@ -84,46 +82,6 @@ export function ProviderToggle({ provider, projectId, existing }: Props) {
           </button>
         </div>
       </div>
-
-      {expanded && needsCredentials && (
-        <div className="border-t border-zinc-800 px-4 py-4 space-y-3">
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Client ID</label>
-            <input
-              type="text"
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-brand-500"
-              placeholder="Enter client ID"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Client Secret</label>
-            <input
-              type="password"
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-brand-500"
-              placeholder="Enter client secret"
-            />
-          </div>
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setExpanded(false)}
-              className="cursor-pointer px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={save}
-              disabled={saving}
-              className="cursor-pointer px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-700 text-white rounded transition-colors disabled:opacity-50"
-            >
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

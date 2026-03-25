@@ -39,7 +39,7 @@ export default function AuthLayout({
 
   function isActive(suffix: string) {
     if (suffix === "") {
-      return pathname === base;
+      return pathname === base || pathname.startsWith(base + "/providers");
     }
     return pathname.startsWith(base + suffix);
   }
