@@ -76,7 +76,7 @@ Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 ### 1. Clone & configure
 
 ```bash
-git clone https://github.com/your-org/postbase
+git clone https://github.com/harshalone/postbase
 cd postbase
 cp .env.example .env
 ```
