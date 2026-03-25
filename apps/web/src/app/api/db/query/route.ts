@@ -11,7 +11,7 @@
  * service key → bypasses RLS, full access
  */
 import { NextRequest } from "next/server";
-import { Pool } from "pg";
+import { pool } from "@/lib/db";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
 import { z } from "zod";
@@ -192,7 +192,6 @@ export async function POST(req: NextRequest) {
   }
 
   // 4. Connect to postgres
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   const client = await pool.connect();
 
   try {
@@ -319,6 +318,5 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: message }, { status: 400 });
   } finally {
     client.release();
-    await pool.end();
   }
 }
