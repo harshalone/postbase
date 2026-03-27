@@ -3,6 +3,8 @@ import Image from "next/image";
 import { auth } from "@/lib/auth/admin";
 import { UserMenu } from "./user-menu";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardLayout({
   children,
 }: {

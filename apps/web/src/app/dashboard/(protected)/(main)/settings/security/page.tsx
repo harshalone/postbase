@@ -1,6 +1,8 @@
 import { auth } from "@/lib/auth/admin";
 import { TwoFactorSection } from "./two-factor-section";
 
+export const dynamic = "force-dynamic";
+
 export default async function SecuritySettingsPage() {
   const session = await auth();
   const totpEnabled = (session?.user as { totpEnabled?: boolean })?.totpEnabled ?? false;

@@ -1,6 +1,8 @@
 import { auth } from "@/lib/auth/admin";
 import { ChangePasswordSection } from "./change-password-section";
 
+export const dynamic = "force-dynamic";
+
 export default async function SettingsPage() {
   const session = await auth();
   const email = session?.user?.email ?? "";
