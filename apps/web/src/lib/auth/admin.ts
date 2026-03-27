@@ -13,6 +13,7 @@ const REMEMBER_ME_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   basePath: "/api/auth/admin",
+  trustHost: true,
   providers: [
     Credentials({
       credentials: {
