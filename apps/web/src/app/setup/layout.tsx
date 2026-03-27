@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { adminUsers } from "@/lib/db/schema";
 
+export const dynamic = "force-dynamic";
+
 export default async function SetupLayout({
   children,
 }: {

@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth/admin";
 import { db } from "@/lib/db";
 import { adminUsers } from "@/lib/db/schema";
 
+export const dynamic = "force-dynamic";
+
 export default async function ProtectedDashboardLayout({
   children,
 }: {
