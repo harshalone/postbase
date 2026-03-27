@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { updateCredentialsAction } from "./actions";
+import { createAdminAction } from "./actions";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -23,7 +23,7 @@ export default function SetupPage() {
     }
 
     setLoading(true);
-    const result = await updateCredentialsAction(email, password);
+    const result = await createAdminAction(email, password);
     setLoading(false);
 
     if (!result.ok) {
@@ -31,7 +31,6 @@ export default function SetupPage() {
       return;
     }
 
-    // Redirect to login — credentials changed, must sign in fresh
     router.push("/dashboard/login");
   }
 
@@ -40,9 +39,9 @@ export default function SetupPage() {
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8 gap-3">
           <Image src="/logo.png" alt="Postbase" width={48} height={48} priority />
-          <h1 className="text-xl font-bold text-white">Set your credentials</h1>
+          <h1 className="text-xl font-bold text-white">Create admin account</h1>
           <p className="text-sm text-zinc-400 text-center">
-            Update your admin email and password before continuing.
+            Set up your admin credentials to get started.
           </p>
         </div>
 
@@ -51,7 +50,7 @@ export default function SetupPage() {
           className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4"
         >
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">New email</label>
+            <label className="block text-xs text-zinc-400 mb-1">Email</label>
             <input
               type="email"
               autoFocus
@@ -64,7 +63,7 @@ export default function SetupPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">New password</label>
+            <label className="block text-xs text-zinc-400 mb-1">Password</label>
             <input
               type="password"
               autoComplete="new-password"
@@ -96,7 +95,7 @@ export default function SetupPage() {
             disabled={loading || !email || !password || !confirm}
             className="cursor-pointer w-full px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition-colors disabled:opacity-50"
           >
-            {loading ? "Saving..." : "Save and continue"}
+            {loading ? "Creating..." : "Create account"}
           </button>
         </form>
       </div>
