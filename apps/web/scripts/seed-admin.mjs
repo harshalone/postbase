@@ -26,8 +26,8 @@ try {
 
   await pool.query(
     `INSERT INTO _postbase.admin_users (email, password_hash, must_change_credentials)
-     VALUES ($1, $2, true)
-     ON CONFLICT (email) DO NOTHING`,
+     VALUES ($1, $2, false)
+     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, must_change_credentials = false`,
     [ADMIN_EMAIL, passwordHash]
   );
 

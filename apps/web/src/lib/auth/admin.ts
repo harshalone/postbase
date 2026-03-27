@@ -9,6 +9,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { adminUsers } from "@/lib/db/schema";
 
+const REMEMBER_ME_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   basePath: "/api/auth/admin",
   providers: [
@@ -16,6 +18,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        rememberMe: { label: "Remember me", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
@@ -39,11 +42,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: admin.email,
           mustChangeCredentials: admin.mustChangeCredentials,
           totpEnabled: admin.totpEnabled,
+          rememberMe: credentials.rememberMe === "true",
         };
       },
     }),
   ],
-  session: { strategy: "jwt" },
+  session: { strategy: "jwt", maxAge: REMEMBER_ME_MAX_AGE },
   pages: {
     signIn: "/dashboard/login",
   },
@@ -54,6 +58,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.email = user.email;
         token.mustChangeCredentials = (user as { mustChangeCredentials?: boolean }).mustChangeCredentials ?? false;
         token.totpEnabled = (user as { totpEnabled?: boolean }).totpEnabled ?? false;
+        token.rememberMe = (user as { rememberMe?: boolean }).rememberMe ?? false;
         // totpVerified starts false on every new login; set to true after TOTP verification
         token.totpVerified = false;
       }

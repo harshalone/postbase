@@ -11,6 +11,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -19,7 +20,14 @@ function LoginForm() {
     setLoading(true);
     setError("");
 
-    const result = await loginAction(email, password);
+    let result: { ok: boolean; error?: string; mustChangeCredentials?: boolean; totpEnabled?: boolean };
+    try {
+      result = await loginAction(email, password, rememberMe);
+    } catch {
+      setLoading(false);
+      setError("Invalid email or password.");
+      return;
+    }
 
     setLoading(false);
 
@@ -28,18 +36,9 @@ function LoginForm() {
       return;
     }
 
-    // Check mustChangeCredentials via the session endpoint
-    const res = await fetch("/api/auth/admin/session");
-    const session = await res.json();
-
-    const user = session?.user as {
-      mustChangeCredentials?: boolean;
-      totpEnabled?: boolean;
-    } | undefined;
-
-    if (user?.mustChangeCredentials) {
-      router.push("/dashboard/setup");
-    } else if (user?.totpEnabled) {
+    if (result.mustChangeCredentials) {
+      router.push("/setup");
+    } else if (result.totpEnabled) {
       const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
       router.push(`/dashboard/2fa/verify?callbackUrl=${encodeURIComponent(callbackUrl)}`);
     } else {
@@ -85,6 +84,16 @@ function LoginForm() {
               required
             />
           </div>
+
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="w-4 h-4 rounded border border-zinc-600 bg-zinc-800 accent-brand-600"
+            />
+            <span className="text-xs text-zinc-400">Remember me for 30 days</span>
+          </label>
 
           {error && <p className="text-xs text-red-400">{error}</p>}
 
