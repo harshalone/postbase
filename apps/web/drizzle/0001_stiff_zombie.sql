@@ -1,4 +1,4 @@
-CREATE TABLE "_postbase"."admin_users" (
+CREATE TABLE IF NOT EXISTS "_postbase"."admin_users" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"email" text NOT NULL,
 	"password_hash" text NOT NULL,
