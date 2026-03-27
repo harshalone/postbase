@@ -51,6 +51,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user, trigger, session: sessionUpdate }) {
       if (user) {
         token.id = user.id;
+        token.email = user.email;
         token.mustChangeCredentials = (user as { mustChangeCredentials?: boolean }).mustChangeCredentials ?? false;
         token.totpEnabled = (user as { totpEnabled?: boolean }).totpEnabled ?? false;
         // totpVerified starts false on every new login; set to true after TOTP verification
@@ -64,6 +65,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
+        session.user.email = token.email as string;
         (session.user as { mustChangeCredentials?: boolean }).mustChangeCredentials = token.mustChangeCredentials as boolean;
         (session.user as { totpEnabled?: boolean }).totpEnabled = token.totpEnabled as boolean;
         (session.user as { totpVerified?: boolean }).totpVerified = token.totpVerified as boolean;
