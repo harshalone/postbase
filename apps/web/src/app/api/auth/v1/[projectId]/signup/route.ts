@@ -10,11 +10,9 @@
 import { NextRequest } from "next/server";
 import { hash } from "bcryptjs";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users, sessions } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 import { signJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";
+import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 import { nanoid } from "nanoid";
 
 const bodySchema = z.object({
@@ -44,66 +42,65 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   }
   const { email, password, data: metadata } = parsed.data;
 
-  const [existing] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.projectId, keyInfo.projectId), eq(users.email, email)))
-    .limit(1);
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
 
-  if (existing) {
-    return Response.json({ error: "User already registered" }, { status: 422 });
-  }
+    const { rows: [existing] } = await client.query(
+      `SELECT id FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,
+      [email]
+    );
+    if (existing) {
+      return Response.json({ error: "User already registered" }, { status: 422 });
+    }
 
-  const passwordHash = await hash(password, 12);
+    const passwordHash = await hash(password, 12);
 
-  const [user] = await db
-    .insert(users)
-    .values({
-      projectId: keyInfo.projectId,
-      email,
-      passwordHash,
-      metadata: metadata ?? {},
-      emailVerified: null,
-    })
-    .returning();
+    const { rows: [user] } = await client.query(
+      `INSERT INTO "${schema}"."users" ("email", "password_hash", "metadata")
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [email, passwordHash, JSON.stringify(metadata ?? {})]
+    );
 
-  const secret = getJwtSecret();
-  const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
-  const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
+    const secret = getJwtSecret();
+    const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
+    const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
 
-  const accessToken = await signJwt(
-    { sub: user.id, pid: keyInfo.projectId, email: user.email!, exp: expiresAt },
-    secret
-  );
-  const refreshToken = await signJwt(
-    { sub: user.id, pid: keyInfo.projectId, email: user.email!, exp: refreshExpiresAt, jti: nanoid() },
-    secret
-  );
+    const accessToken = await signJwt(
+      { sub: user.id, pid: keyInfo.projectId, email: user.email, exp: expiresAt },
+      secret
+    );
+    const refreshToken = await signJwt(
+      { sub: user.id, pid: keyInfo.projectId, email: user.email, exp: refreshExpiresAt, jti: nanoid() },
+      secret
+    );
 
-  await db.insert(sessions).values({
-    userId: user.id,
-    projectId: keyInfo.projectId,
-    sessionToken: refreshToken,
-    expires: new Date(refreshExpiresAt * 1000),
-  });
+    await client.query(
+      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires")
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING`,
+      [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
+    );
 
-  const userOut = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    image: user.image,
-    emailVerified: !!user.emailVerified,
-    metadata: user.metadata,
-    createdAt: user.createdAt.toISOString(),
-  };
+    const userOut = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      image: user.image,
+      emailVerified: !!user.email_verified,
+      metadata: user.metadata,
+      createdAt: user.created_at,
+    };
 
-  return Response.json({
-    user: userOut,
-    session: {
-      accessToken,
-      refreshToken,
-      expiresAt,
+    return Response.json({
       user: userOut,
-    },
-  });
+      session: { accessToken, refreshToken, expiresAt, user: userOut },
+    });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }

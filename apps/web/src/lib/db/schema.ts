@@ -5,7 +5,6 @@ import {
   boolean,
   integer,
   jsonb,
-  primaryKey,
   uuid,
   index,
 } from "drizzle-orm/pg-core";
@@ -35,86 +34,11 @@ export const projects = postbaseSchema.table("projects", {
   anonKey: text("anon_key").notNull().unique(),
   serviceRoleKey: text("service_role_key").notNull().unique(),
   databaseUrl: text("database_url"), // optional: per-project DB
-  // Admin-defined extra columns shown in the Users dashboard (stored in user metadata)
+  // Stores label/type metadata for custom user columns (source of truth is real DB columns)
   userColumnDefs: jsonb("user_column_defs").default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
-
-// ─── Auth tables (NextAuth / Auth.js compatible) ──────────────────────────────
-
-export const users = postbaseSchema.table("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  name: text("name"),
-  email: text("email").notNull(),
-  emailVerified: timestamp("email_verified", { mode: "date" }),
-  image: text("image"),
-  passwordHash: text("password_hash"),
-  phone: text("phone"),
-  phoneVerified: timestamp("phone_verified", { mode: "date" }),
-  isAnonymous: boolean("is_anonymous").default(false),
-  metadata: jsonb("metadata").default({}),
-  bannedAt: timestamp("banned_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
-export const accounts = postbaseSchema.table(
-  "accounts",
-  {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    type: text("type").notNull(),
-    provider: text("provider").notNull(),
-    providerAccountId: text("provider_account_id").notNull(),
-    refreshToken: text("refresh_token"),
-    accessToken: text("access_token"),
-    expiresAt: integer("expires_at"),
-    tokenType: text("token_type"),
-    scope: text("scope"),
-    idToken: text("id_token"),
-    sessionState: text("session_state"),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.provider, t.providerAccountId] }),
-    userIdx: index("accounts_user_idx").on(t.userId),
-  })
-);
-
-export const sessions = postbaseSchema.table(
-  "sessions",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    sessionToken: text("session_token").notNull().unique(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    expires: timestamp("expires", { mode: "date" }).notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (t) => ({
-    userIdx: index("sessions_user_idx").on(t.userId),
-  })
-);
-
-export const verificationTokens = postbaseSchema.table(
-  "verification_tokens",
-  {
-    identifier: text("identifier").notNull(),
-    token: text("token").notNull(),
-    expires: timestamp("expires", { mode: "date" }).notNull(),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.identifier, t.token] }),
-  })
-);
 
 // ─── Provider configuration ───────────────────────────────────────────────────
 
@@ -164,9 +88,8 @@ export const storageObjects = postbaseSchema.table(
       .notNull()
       .references(() => storageBuckets.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    ownerId: uuid("owner_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
+    // Soft reference — no FK since users now live in per-project schemas
+    ownerId: uuid("owner_id"),
     size: integer("size").notNull(),
     mimeType: text("mime_type"),
     metadata: jsonb("metadata").default({}),
@@ -262,9 +185,8 @@ export const auditLogs = postbaseSchema.table(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    userId: uuid("user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
+    // Soft reference — no FK since users now live in per-project schemas
+    userId: uuid("user_id"),
     action: text("action").notNull(), // 'auth.login', 'db.query', 'storage.upload'
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
@@ -301,8 +223,6 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
     fields: [projects.organisationId],
     references: [organisations.id],
   }),
-  users: many(users),
-  sessions: many(sessions),
   providerConfigs: many(providerConfigs),
   storageBuckets: many(storageBuckets),
   storageConnections: many(storageConnections),
@@ -312,19 +232,4 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
     references: [emailSettings.projectId],
   }),
   emailTemplates: many(emailTemplates),
-}));
-
-export const usersRelations = relations(users, ({ one, many }) => ({
-  project: one(projects, { fields: [users.projectId], references: [projects.id] }),
-  accounts: many(accounts),
-  sessions: many(sessions),
-}));
-
-export const accountsRelations = relations(accounts, ({ one }) => ({
-  user: one(users, { fields: [accounts.userId], references: [users.id] }),
-}));
-
-export const sessionsRelations = relations(sessions, ({ one }) => ({
-  user: one(users, { fields: [sessions.userId], references: [users.id] }),
-  project: one(projects, { fields: [sessions.projectId], references: [projects.id] }),
 }));

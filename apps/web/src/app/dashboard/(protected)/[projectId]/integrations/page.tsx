@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, use } from "react";
+import { useToast } from "@/hooks/use-toast";
 import {
   Clock,
   Layers,
@@ -362,6 +363,7 @@ export default function IntegrationsPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>("cron");
 
   // ── Cron state ──────────────────────────────────────────────────────────────
@@ -465,7 +467,7 @@ export default function IntegrationsPage({
           body: JSON.stringify({ action: "create", jobName: v.name, schedule: v.schedule, command: cmd }),
         });
         const data = await res.json();
-        if (data.error) { alert(data.error); return; }
+        if (data.error) { toast.error(data.error); return; }
       } else {
         const res = await fetch(`/api/dashboard/${projectId}/cron`, {
           method: "POST",
@@ -473,7 +475,7 @@ export default function IntegrationsPage({
           body: JSON.stringify({ action: "create", jobName: v.name, schedule: v.schedule, command: cmd }),
         });
         const data = await res.json();
-        if (data.error) { alert(data.error); return; }
+        if (data.error) { toast.error(data.error); return; }
       }
       setShowDialog(false);
       setEditingJob(null);
@@ -532,7 +534,7 @@ export default function IntegrationsPage({
         body: JSON.stringify({ action: "create", queueName: newQueueName }),
       });
       const data = await res.json();
-      if (data.error) { alert(data.error); return; }
+      if (data.error) { toast.error(data.error); return; }
       setShowNewQueue(false);
       setNewQueueName("");
       fetchQueues();
@@ -574,7 +576,7 @@ export default function IntegrationsPage({
     try {
       parsed = JSON.parse(sendForm);
     } catch {
-      alert("Message must be valid JSON");
+      toast.error("Message must be valid JSON"); return;
       return;
     }
     const res = await fetch(`/api/dashboard/${projectId}/queues`, {
@@ -583,7 +585,7 @@ export default function IntegrationsPage({
       body: JSON.stringify({ action: "send", queueName: q.name, message: parsed }),
     });
     const data = await res.json();
-    if (data.error) { alert(data.error); return; }
+    if (data.error) { toast.error(data.error); return; }
     setSendForm("");
     setShowSend(false);
     readMessages(q);

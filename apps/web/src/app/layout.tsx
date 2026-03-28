@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import NextTopLoader from "nextjs-toploader";
+import { ToastProvider } from "@/hooks/use-toast";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -20,7 +21,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body>
         <NextTopLoader color="#c4623a" shadow={false} showSpinner={false} />
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

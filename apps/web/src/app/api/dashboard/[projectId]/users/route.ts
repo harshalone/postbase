@@ -3,45 +3,60 @@
  */
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq, count } from "drizzle-orm";
+import { projects } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
+
+  const [project] = await db
+    .select({ databaseUrl: projects.databaseUrl })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+
+  if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
+
   const { searchParams } = req.nextUrl;
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
   const perPage = Math.min(100, Math.max(1, parseInt(searchParams.get("perPage") ?? "50", 10)));
   const offset = (page - 1) * perPage;
 
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(users)
-    .where(eq(users.projectId, projectId));
+  const schema = getProjectSchema(projectId);
+  const pool = getProjectPool(project.databaseUrl);
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
 
-  const rows = await db
-    .select()
-    .from(users)
-    .where(eq(users.projectId, projectId))
-    .limit(perPage)
-    .offset(offset)
-    .orderBy(users.createdAt);
+    const { rows: [{ total }] } = await client.query(
+      `SELECT COUNT(*)::int AS total FROM "${schema}"."users"`
+    );
+    const { rows } = await client.query(
+      `SELECT * FROM "${schema}"."users" ORDER BY "created_at" LIMIT $1 OFFSET $2`,
+      [perPage, offset]
+    );
 
-  const formatted = rows.map((u) => ({
-    id: u.id,
-    email: u.email,
-    name: u.name,
-    image: u.image,
-    emailVerified: !!u.emailVerified,
-    phone: u.phone,
-    isAnonymous: u.isAnonymous,
-    bannedAt: u.bannedAt?.toISOString() ?? null,
-    metadata: (u.metadata ?? {}) as Record<string, unknown>,
-    createdAt: u.createdAt.toISOString(),
-    updatedAt: u.updatedAt.toISOString(),
-  }));
+    const users = rows.map((u) => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      image: u.image,
+      emailVerified: !!u.email_verified,
+      phone: u.phone,
+      isAnonymous: u.is_anonymous,
+      bannedAt: u.banned_at ? new Date(u.banned_at).toISOString() : null,
+      metadata: u.metadata ?? {},
+      createdAt: new Date(u.created_at).toISOString(),
+      updatedAt: new Date(u.updated_at).toISOString(),
+    }));
 
-  return Response.json({ users: formatted, total, page, perPage });
+    return Response.json({ users, total, page, perPage });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }

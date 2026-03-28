@@ -7,8 +7,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { projects } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 
 const patchSchema = z.object({
   metadata: z.record(z.unknown()),
@@ -28,20 +29,40 @@ export async function PATCH(
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const [user] = await db
-    .update(users)
-    .set({ metadata: parsed.data.metadata, updatedAt: new Date() })
-    .where(and(eq(users.id, userId), eq(users.projectId, projectId)))
-    .returning();
+  const [project] = await db
+    .select({ databaseUrl: projects.databaseUrl })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
 
-  if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+  if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
 
-  return Response.json({
-    user: {
-      id: user.id,
-      email: user.email,
-      metadata: (user.metadata ?? {}) as Record<string, unknown>,
-      updatedAt: user.updatedAt.toISOString(),
-    },
-  });
+  const schema = getProjectSchema(projectId);
+  const pool = getProjectPool(project.databaseUrl);
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
+
+    const { rows: [user] } = await client.query(
+      `UPDATE "${schema}"."users"
+       SET "metadata" = $1, "updated_at" = now()
+       WHERE "id" = $2
+       RETURNING id, email, metadata, updated_at`,
+      [JSON.stringify(parsed.data.metadata), userId]
+    );
+
+    if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+
+    return Response.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        metadata: user.metadata ?? {},
+        updatedAt: new Date(user.updated_at).toISOString(),
+      },
+    });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }

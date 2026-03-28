@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useSlidePanel } from "@/hooks/use-slide-panel";
-import { Plus } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Plus, X, AlertTriangle } from "lucide-react";
 import { AddColumnModal } from "./add-column-modal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,10 +35,10 @@ interface UsersTableProps {
   initialColumns: UserColumnDef[];
 }
 
-// ─── Locked fundamental fields — never editable / removable ──────────────────
+// ─── Locked fundamental fields ────────────────────────────────────────────────
 
 const LOCKED_BADGE = (
-  <span className="ml-1.5 inline-flex items-center gap-0.5 text-zinc-600" title="Auth field — read only">
+  <span className="ml-1 inline-flex items-center text-zinc-600" title="Auth field — read only">
     <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
       <path d="M11 7V5a3 3 0 0 0-6 0v2H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1zm-5-2a2 2 0 1 1 4 0v2H6V5z"/>
     </svg>
@@ -53,13 +54,12 @@ function formatDate(iso: string) {
 }
 
 function MetadataCell({
-  userId, colKey, colType, value, fullMetadata, projectId, onSaved,
+  userId, colKey, colType, value, projectId, onSaved,
 }: {
   userId: string;
   colKey: string;
   colType: UserColumnDef["type"];
   value: unknown;
-  fullMetadata: Record<string, unknown>;
   projectId: string;
   onSaved: (userId: string, key: string, value: unknown) => void;
 }) {
@@ -73,11 +73,10 @@ function MetadataCell({
     if (colType === "boolean") parsed = draft === "true";
 
     startTransition(async () => {
-      // We need the full current metadata to merge — passed via the parent
       const res = await fetch(`/api/dashboard/${projectId}/users/${userId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ metadata: { ...fullMetadata, [colKey]: parsed } }),
+        body: JSON.stringify({ [colKey]: parsed }),
       });
       if (res.ok) {
         onSaved(userId, colKey, parsed);
@@ -133,60 +132,178 @@ function MetadataCell({
           className="flex-1 bg-zinc-800 border border-brand-500 rounded px-1 py-0.5 text-xs text-white min-w-0"
         />
       )}
-      <button
-        onClick={save}
-        disabled={isPending}
-        className="text-emerald-400 hover:text-emerald-300 text-xs disabled:opacity-50"
-      >✓</button>
-      <button
-        onClick={() => setEditing(false)}
-        className="text-zinc-500 hover:text-zinc-300 text-xs"
-      >✕</button>
+      <button onClick={save} disabled={isPending} className="text-emerald-400 hover:text-emerald-300 text-xs disabled:opacity-50">✓</button>
+      <button onClick={() => setEditing(false)} className="text-zinc-500 hover:text-zinc-300 text-xs">✕</button>
     </div>
+  );
+}
+
+// ─── Column detail slide panel ────────────────────────────────────────────────
+
+function ColumnPanel({
+  col,
+  projectId,
+  onDeleted,
+  onClose,
+  closing,
+}: {
+  col: UserColumnDef;
+  projectId: string;
+  onDeleted: (key: string) => void;
+  onClose: () => void;
+  closing?: boolean;
+}) {
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    if (confirmText !== col.key) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/dashboard/projects/${projectId}/user-columns/${col.key}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        onDeleted(col.key);
+        onClose();
+      } else {
+        const data = await res.json();
+        setError(data.error ?? "Failed to delete column");
+      }
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <div className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${closing ? "closing" : ""}`} onClick={onClose} />
+      <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[480px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${closing ? "closing" : ""}`}>
+
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-zinc-800 shrink-0 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-white">{col.label}</h2>
+            <p className="text-xs text-zinc-500 mt-0.5 font-mono">{col.key} · {col.type}</p>
+          </div>
+          <button onClick={onClose} className="cursor-pointer text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-zinc-500">Column name</span>
+              <span className="text-zinc-200 font-mono">{col.key}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-zinc-500">Display label</span>
+              <span className="text-zinc-200">{col.label}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-zinc-500">Type</span>
+              <span className="text-zinc-200">{col.type}</span>
+            </div>
+          </div>
+
+          <p className="text-xs text-zinc-600 leading-relaxed">
+            This is a real column on your project&apos;s <span className="font-mono text-zinc-500">users</span> table.
+            Values are stored directly in the database, not in metadata JSON.
+          </p>
+        </div>
+
+        {/* Danger zone */}
+        <div className="px-6 py-6 border-t border-zinc-800 shrink-0 space-y-4">
+          <div className="flex items-center gap-2 text-red-400">
+            <AlertTriangle size={14} />
+            <span className="text-sm font-semibold">Danger Zone</span>
+          </div>
+          <div className="bg-red-950/30 border border-red-900/40 rounded-lg p-4 space-y-3">
+            <p className="text-sm text-red-300 leading-relaxed">
+              Deleting this column will <strong>permanently remove all data</strong> stored in{" "}
+              <span className="font-mono text-red-200">{col.key}</span> for every user.
+              This cannot be undone.
+            </p>
+            <p className="text-xs text-zinc-500">
+              Type <span className="font-mono text-zinc-300">{col.key}</span> to confirm deletion:
+            </p>
+            <input
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder={col.key}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-red-500 font-mono"
+            />
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            <button
+              onClick={handleDelete}
+              disabled={confirmText !== col.key || deleting}
+              className="cursor-pointer w-full px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+            >
+              {deleting ? "Deleting…" : `Delete column "${col.key}"`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function UsersTable({ projectId, initialUsers, initialTotal, initialColumns }: UsersTableProps) {
+  const toast = useToast();
   const [users, setUsers] = useState<DashboardUser[]>(initialUsers);
   const [total] = useState(initialTotal);
   const [columns, setColumns] = useState<UserColumnDef[]>(initialColumns);
-  const addColumnPanel = useSlidePanel();
-  const showAddColumn = addColumnPanel.visible;
   const [search, setSearch] = useState("");
+  const [selectedCol, setSelectedCol] = useState<UserColumnDef | null>(null);
+
+  const addColumnPanel = useSlidePanel();
+  const colDetailPanel = useSlidePanel();
 
   function handleMetadataSaved(userId: string, key: string, value: unknown) {
     setUsers((prev) =>
       prev.map((u) =>
-        u.id === userId
-          ? { ...u, metadata: { ...u.metadata, [key]: value } }
-          : u
+        u.id === userId ? { ...u, metadata: { ...u.metadata, [key]: value } } : u
       )
     );
   }
 
-  async function handleRemoveColumn(key: string) {
-    const next = columns.filter((c) => c.key !== key);
-    const res = await fetch(`/api/dashboard/projects/${projectId}/user-columns`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columns: next }),
-    });
-    if (res.ok) setColumns(next);
+  function openColumnPanel(col: UserColumnDef) {
+    setSelectedCol(col);
+    colDetailPanel.open();
   }
 
-  async function handleAddColumn(col: UserColumnDef) {
-    const next = [...columns, col];
+  async function handleAddColumn(col: UserColumnDef & { rawType: string; defaultValue?: string; nullable?: boolean }) {
     const res = await fetch(`/api/dashboard/projects/${projectId}/user-columns`, {
-      method: "PUT",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columns: next }),
+      body: JSON.stringify({
+        key: col.key,
+        label: col.label,
+        rawType: col.rawType,
+        defaultValue: col.defaultValue,
+        nullable: col.nullable ?? true,
+      }),
     });
-    if (res.ok) {
-      setColumns(next);
-      addColumnPanel.close();
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const msg = body?.error ? (typeof body.error === "string" ? body.error : JSON.stringify(body.error)) : `HTTP ${res.status}`;
+      toast.error("Failed to add column", msg);
+      throw new Error(msg);
     }
+    setColumns((prev) => [...prev, { key: col.key, label: col.label, type: col.type }]);
+    toast.success("Column added", `"${col.label}" is now available on all users`);
+    addColumnPanel.close();
+  }
+
+  function handleColumnDeleted(key: string) {
+    setColumns((prev) => prev.filter((c) => c.key !== key));
+    setSelectedCol(null);
   }
 
   const filtered = search.trim()
@@ -224,45 +341,33 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
-              {/* Locked columns */}
-              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">
-                User {LOCKED_BADGE}
-              </th>
-              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">
-                Verified {LOCKED_BADGE}
-              </th>
-              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">
-                Created {LOCKED_BADGE}
-              </th>
-              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">
-                Status {LOCKED_BADGE}
-              </th>
+              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">User {LOCKED_BADGE}</th>
+              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">Verified {LOCKED_BADGE}</th>
+              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">Created {LOCKED_BADGE}</th>
+              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">Status {LOCKED_BADGE}</th>
 
-              {/* Custom columns */}
               {columns.map((col) => (
                 <th key={col.key} className="text-left px-4 py-3 font-medium whitespace-nowrap">
-                  <span className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => openColumnPanel(col)}
+                    className="cursor-pointer flex items-center gap-1.5 hover:text-zinc-300 transition-colors group"
+                    title={`Edit column "${col.label}"`}
+                  >
                     {col.label}
-                    <span className="text-zinc-700 text-xs normal-case tracking-normal font-normal">
-                      ({col.type})
-                    </span>
-                    <button
-                      onClick={() => handleRemoveColumn(col.key)}
-                      className="text-zinc-700 hover:text-red-400 transition-colors ml-0.5"
-                      title={`Remove column "${col.label}"`}
-                    >
-                      ×
-                    </button>
-                  </span>
+                    <span className="text-zinc-700 text-xs normal-case tracking-normal font-normal">({col.type})</span>
+                    {/* Open lock icon — indicates editable/configurable */}
+                    <svg className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500 shrink-0" width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M11 1a2 2 0 0 0-2 2v4a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h5V3a3 3 0 0 1 6 0v4a.5.5 0 0 1-1 0V3a2 2 0 0 0-2-2z"/>
+                    </svg>
+                  </button>
                 </th>
               ))}
-
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5 + columns.length} className="px-6 py-20 text-center text-zinc-500">
+                <td colSpan={4 + columns.length} className="px-6 py-20 text-center text-zinc-500">
                   {search ? (
                     <p>No users match <span className="text-zinc-400">"{search}"</span></p>
                   ) : (
@@ -276,7 +381,7 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
             ) : (
               filtered.map((user) => (
                 <tr key={user.id} className="hover:bg-zinc-800/40 transition-colors">
-                  {/* Email + name — locked */}
+                  {/* User — locked */}
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-3">
                       <div className="w-7 h-7 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-medium text-zinc-300 shrink-0">
@@ -317,7 +422,7 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
                     )}
                   </td>
 
-                  {/* Custom metadata columns — editable */}
+                  {/* Custom columns — editable */}
                   {columns.map((col) => (
                     <td key={col.key} className="px-4 py-3 text-zinc-300 text-xs max-w-[180px]">
                       <MetadataCell
@@ -325,13 +430,11 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
                         colKey={col.key}
                         colType={col.type}
                         value={user.metadata[col.key]}
-                        fullMetadata={user.metadata}
                         projectId={projectId}
                         onSaved={handleMetadataSaved}
                       />
                     </td>
                   ))}
-
                 </tr>
               ))
             )}
@@ -339,12 +442,29 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
         </table>
       </div>
 
-      {showAddColumn && (
+      {/* Add column panel */}
+      {addColumnPanel.visible && (
         <AddColumnModal
-          existingKeys={columns.map((c) => c.key)}
+          existingKeys={[
+            "id","name","email","email_verified","image","password_hash",
+            "phone","phone_verified","is_anonymous","metadata","banned_at",
+            "created_at","updated_at",
+            ...columns.map((c) => c.key),
+          ]}
           onAdd={handleAddColumn}
           onClose={() => addColumnPanel.close()}
           closing={addColumnPanel.closing}
+        />
+      )}
+
+      {/* Column detail / danger zone panel */}
+      {colDetailPanel.visible && selectedCol && (
+        <ColumnPanel
+          col={selectedCol}
+          projectId={projectId}
+          onDeleted={handleColumnDeleted}
+          onClose={() => colDetailPanel.close()}
+          closing={colDetailPanel.closing}
         />
       )}
     </>

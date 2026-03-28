@@ -8,9 +8,10 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { users, verificationTokens, emailSettings, emailTemplates } from "@/lib/db/schema";
+import { emailSettings, emailTemplates } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
+import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 import { nanoid } from "nanoid";
 import { createTransport } from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
@@ -40,95 +41,107 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
   const { email, redirectTo } = parsed.data;
 
-  let [user] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.projectId, keyInfo.projectId), eq(users.email, email)))
-    .limit(1);
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
 
-  if (!user) {
-    const [newUser] = await db
-      .insert(users)
-      .values({ projectId: keyInfo.projectId, email })
-      .returning({ id: users.id });
-    user = newUser;
-  }
-
-  const token = nanoid(64);
-  const expires = new Date(Date.now() + 60 * 60 * 1000);
-
-  await db.delete(verificationTokens).where(eq(verificationTokens.identifier, email));
-  await db.insert(verificationTokens).values({ identifier: email, token, expires });
-
-  const baseUrl = process.env.NEXTAUTH_URL ?? req.nextUrl.origin;
-  const magicLink = `${baseUrl}/api/auth/v1/${projectId}/verify?token=${token}&email=${encodeURIComponent(email)}${redirectTo ? `&redirectTo=${encodeURIComponent(redirectTo)}` : ""}`;
-
-  const [settings] = await db
-    .select()
-    .from(emailSettings)
-    .where(eq(emailSettings.projectId, keyInfo.projectId))
-    .limit(1);
-
-  const isSmtpConfigured = settings?.provider === "smtp" && settings.smtpHost;
-  const isSesIamConfigured = settings?.provider === "ses" && settings.sesAccessKeyId && settings.sesSecretAccessKey;
-  const isSesSmtpConfigured = settings?.provider === "ses" && settings.sesSmtpUsername && settings.sesSmtpPassword;
-  const emailConfigured = isSmtpConfigured || isSesIamConfigured || isSesSmtpConfigured;
-
-  if (!emailConfigured) {
-    if (process.env.NODE_ENV === "development") {
-      return Response.json({ message: "OTP sent", _dev_magic_link: magicLink });
+    // Upsert user — create if not exists
+    const { rows: [existing] } = await client.query(
+      `SELECT id FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,
+      [email]
+    );
+    if (!existing) {
+      await client.query(
+        `INSERT INTO "${schema}"."users" ("email") VALUES ($1) ON CONFLICT DO NOTHING`,
+        [email]
+      );
     }
-    return Response.json({ error: "Email not configured for this project" }, { status: 500 });
+
+    const token = nanoid(64);
+    const expires = new Date(Date.now() + 60 * 60 * 1000);
+
+    // Delete any existing token for this email then insert new one
+    await client.query(
+      `DELETE FROM "${schema}"."verification_tokens" WHERE "identifier" = $1`,
+      [email]
+    );
+    await client.query(
+      `INSERT INTO "${schema}"."verification_tokens" ("identifier", "token", "expires")
+       VALUES ($1, $2, $3)`,
+      [email, token, expires]
+    );
+
+    const baseUrl = process.env.NEXTAUTH_URL ?? req.nextUrl.origin;
+    const magicLink = `${baseUrl}/api/auth/v1/${projectId}/verify?token=${token}&email=${encodeURIComponent(email)}${redirectTo ? `&redirectTo=${encodeURIComponent(redirectTo)}` : ""}`;
+
+    // Email settings still live in _postbase (project config, not user data)
+    const [settings] = await db
+      .select()
+      .from(emailSettings)
+      .where(eq(emailSettings.projectId, keyInfo.projectId))
+      .limit(1);
+
+    const isSmtpConfigured = settings?.provider === "smtp" && settings.smtpHost;
+    const isSesIamConfigured = settings?.provider === "ses" && settings.sesAccessKeyId && settings.sesSecretAccessKey;
+    const isSesSmtpConfigured = settings?.provider === "ses" && settings.sesSmtpUsername && settings.sesSmtpPassword;
+    const emailConfigured = isSmtpConfigured || isSesIamConfigured || isSesSmtpConfigured;
+
+    if (!emailConfigured) {
+      if (process.env.NODE_ENV === "development") {
+        return Response.json({ message: "OTP sent", _dev_magic_link: magicLink });
+      }
+      return Response.json({ error: "Email not configured for this project" }, { status: 500 });
+    }
+
+    const [template] = await db
+      .select()
+      .from(emailTemplates)
+      .where(and(eq(emailTemplates.projectId, keyInfo.projectId), eq(emailTemplates.type, "magic_link")))
+      .limit(1);
+
+    const subject = template?.subject ?? "Your magic link";
+    const htmlBody = template?.body
+      ? template.body.replace("{{magic_link}}", magicLink).replace("{{email}}", email)
+      : `<p>Click <a href="${magicLink}">here</a> to sign in.</p>`;
+
+    let transportConfig: SMTPTransport.Options;
+
+    if (isSesSmtpConfigured) {
+      const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
+      transportConfig = {
+        host: sesSmtpHost, port: 587, secure: false,
+        auth: { user: settings.sesSmtpUsername!, pass: settings.sesSmtpPassword! },
+      };
+    } else if (isSesIamConfigured) {
+      const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
+      transportConfig = {
+        host: sesSmtpHost, port: 587, secure: false,
+        auth: { user: settings.sesAccessKeyId!, pass: settings.sesSecretAccessKey! },
+      };
+    } else {
+      transportConfig = {
+        host: settings.smtpHost!,
+        port: settings.smtpPort ?? 587,
+        secure: settings.smtpSecure ?? true,
+        auth: settings.smtpUser
+          ? { user: settings.smtpUser, pass: settings.smtpPassword ?? "" }
+          : undefined,
+      };
+    }
+
+    const transporter = createTransport(transportConfig);
+    await transporter.sendMail({
+      from: settings.sesFrom ?? settings.smtpFrom ?? settings.smtpUser ?? undefined,
+      to: email,
+      subject,
+      html: htmlBody,
+    });
+
+    return Response.json({ message: "OTP sent" });
+  } finally {
+    client.release();
+    await pool.end();
   }
-
-  const [template] = await db
-    .select()
-    .from(emailTemplates)
-    .where(and(eq(emailTemplates.projectId, keyInfo.projectId), eq(emailTemplates.type, "magic_link")))
-    .limit(1);
-
-  const subject = template?.subject ?? "Your magic link";
-  const htmlBody = template?.body
-    ? template.body.replace("{{magic_link}}", magicLink).replace("{{email}}", email)
-    : `<p>Click <a href="${magicLink}">here</a> to sign in.</p>`;
-
-  let transportConfig: SMTPTransport.Options;
-
-  if (isSesSmtpConfigured) {
-    const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
-    transportConfig = {
-      host: sesSmtpHost,
-      port: 587,
-      secure: false,
-      auth: { user: settings.sesSmtpUsername!, pass: settings.sesSmtpPassword! },
-    };
-  } else if (isSesIamConfigured) {
-    const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
-    transportConfig = {
-      host: sesSmtpHost,
-      port: 587,
-      secure: false,
-      auth: { user: settings.sesAccessKeyId!, pass: settings.sesSecretAccessKey! },
-    };
-  } else {
-    transportConfig = {
-      host: settings.smtpHost!,
-      port: settings.smtpPort ?? 587,
-      secure: settings.smtpSecure ?? true,
-      auth: settings.smtpUser
-        ? { user: settings.smtpUser, pass: settings.smtpPassword ?? "" }
-        : undefined,
-    };
-  }
-
-  const transporter = createTransport(transportConfig);
-
-  await transporter.sendMail({
-    from: settings.sesFrom ?? settings.smtpFrom ?? settings.smtpUser ?? undefined,
-    to: email,
-    subject,
-    html: htmlBody,
-  });
-
-  return Response.json({ message: "OTP sent" });
 }

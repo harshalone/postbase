@@ -5,10 +5,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { hash } from "bcryptjs";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq, and, count } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
+import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 
 async function requireServiceRole(req: NextRequest, projectId: string) {
   const authHeader = req.headers.get("authorization");
@@ -18,18 +16,18 @@ async function requireServiceRole(req: NextRequest, projectId: string) {
   return keyInfo;
 }
 
-function formatUser(user: typeof users.$inferSelect) {
+function formatUser(user: Record<string, unknown>) {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     image: user.image,
-    emailVerified: !!user.emailVerified,
+    emailVerified: !!user.email_verified,
     phone: user.phone,
     metadata: user.metadata,
-    bannedAt: user.bannedAt?.toISOString() ?? null,
-    createdAt: user.createdAt.toISOString(),
-    updatedAt: user.updatedAt.toISOString(),
+    bannedAt: user.banned_at ? new Date(user.banned_at as string).toISOString() : null,
+    createdAt: new Date(user.created_at as string).toISOString(),
+    updatedAt: new Date(user.updated_at as string).toISOString(),
   };
 }
 
@@ -43,20 +41,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
   const perPage = Math.min(100, Math.max(1, parseInt(searchParams.get("perPage") ?? "50", 10)));
   const offset = (page - 1) * perPage;
 
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(users)
-    .where(eq(users.projectId, keyInfo.projectId));
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
 
-  const rows = await db
-    .select()
-    .from(users)
-    .where(eq(users.projectId, keyInfo.projectId))
-    .limit(perPage)
-    .offset(offset)
-    .orderBy(users.createdAt);
+    const { rows: [{ total }] } = await client.query(
+      `SELECT COUNT(*)::int AS total FROM "${schema}"."users"`
+    );
+    const { rows } = await client.query(
+      `SELECT * FROM "${schema}"."users" ORDER BY "created_at" LIMIT $1 OFFSET $2`,
+      [perPage, offset]
+    );
 
-  return Response.json({ users: rows.map(formatUser), total });
+    return Response.json({ users: rows.map(formatUser), total });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }
 
 const createSchema = z.object({
@@ -81,24 +84,32 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
   const { email, password, email_confirm, user_metadata } = parsed.data;
 
-  const [existing] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.projectId, keyInfo.projectId), eq(users.email, email)))
-    .limit(1);
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
 
-  if (existing) return Response.json({ error: "User already exists" }, { status: 422 });
+    const { rows: [existing] } = await client.query(
+      `SELECT id FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,
+      [email]
+    );
+    if (existing) return Response.json({ error: "User already exists" }, { status: 422 });
 
-  const [user] = await db
-    .insert(users)
-    .values({
-      projectId: keyInfo.projectId,
-      email,
-      passwordHash: password ? await hash(password, 12) : null,
-      emailVerified: email_confirm ? new Date() : null,
-      metadata: user_metadata ?? {},
-    })
-    .returning();
+    const passwordHash = password ? await hash(password, 12) : null;
+    const emailVerified = email_confirm ? new Date() : null;
 
-  return Response.json({ user: formatUser(user) }, { status: 201 });
+    const { rows: [user] } = await client.query(
+      `INSERT INTO "${schema}"."users"
+         ("email", "password_hash", "email_verified", "metadata")
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [email, passwordHash, emailVerified, JSON.stringify(user_metadata ?? {})]
+    );
+
+    return Response.json({ user: formatUser(user) }, { status: 201 });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }

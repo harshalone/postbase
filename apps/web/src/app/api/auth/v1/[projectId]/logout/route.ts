@@ -6,11 +6,9 @@
  * Optional: X-Postbase-Token: <access-jwt> to identify the session.
  */
 import { NextRequest } from "next/server";
-import { db } from "@/lib/db";
-import { sessions } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
+import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
@@ -27,9 +25,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     const secret = getJwtSecret();
     const payload = await verifyJwt(token, secret);
     if (payload && payload.pid === keyInfo.projectId) {
-      await db
-        .delete(sessions)
-        .where(and(eq(sessions.userId, payload.sub), eq(sessions.projectId, keyInfo.projectId)));
+      const schema = getProjectSchema(keyInfo.projectId);
+      const pool = getProjectPool();
+      const client = await pool.connect();
+      try {
+        await ensureProjectAuthTables(client, schema);
+        await client.query(
+          `DELETE FROM "${schema}"."sessions" WHERE "user_id" = $1`,
+          [payload.sub]
+        );
+      } finally {
+        client.release();
+        await pool.end();
+      }
     }
   }
 

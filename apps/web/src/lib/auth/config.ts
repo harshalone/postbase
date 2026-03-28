@@ -1,5 +1,4 @@
 import { type NextAuthConfig } from "next-auth";
-import Credentials from "next-auth/providers/credentials";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 import Discord from "next-auth/providers/discord";
@@ -16,10 +15,9 @@ import GitLab from "next-auth/providers/gitlab";
 import Keycloak from "next-auth/providers/keycloak";
 import Okta from "next-auth/providers/okta";
 import Resend from "next-auth/providers/resend";
-import bcrypt from "bcryptjs";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { users, providerConfigs } from "@/lib/db/schema";
+import { providerConfigs } from "@/lib/db/schema";
 
 export type ProviderConfig = {
   provider: string;
@@ -124,43 +122,8 @@ export async function buildAuthConfig(
           providerInstances.push(Resend({ apiKey: extra.apiKey, from: extra.from ?? "noreply@postbase.dev" }));
         break;
       case "credentials":
-        providerInstances.push(
-          Credentials({
-            credentials: {
-              email: { label: "Email", type: "email" },
-              password: { label: "Password", type: "password" },
-            },
-            async authorize(credentials) {
-              if (!credentials?.email || !credentials?.password) return null;
-
-              const [user] = await db
-                .select()
-                .from(users)
-                .where(
-                  and(
-                    eq(users.email, credentials.email as string),
-                    eq(users.projectId, projectId)
-                  )
-                )
-                .limit(1);
-
-              if (!user || !user.passwordHash) return null;
-
-              const valid = await bcrypt.compare(
-                credentials.password as string,
-                user.passwordHash
-              );
-              if (!valid) return null;
-
-              return {
-                id: user.id,
-                email: user.email,
-                name: user.name,
-                image: user.image,
-              };
-            },
-          })
-        );
+        // Email/password auth is handled by the custom /api/auth/v1/[projectId]/token route.
+        // No NextAuth credentials provider needed — users now live in per-project schemas.
         break;
     }
   }

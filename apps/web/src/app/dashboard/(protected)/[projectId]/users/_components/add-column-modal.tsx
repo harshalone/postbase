@@ -198,11 +198,97 @@ function TypeRow({
   );
 }
 
+// ─── Default value suggestions per type ──────────────────────────────────────
+
+const DEFAULT_SUGGESTIONS: Record<string, { label: string; value: string }[]> = {
+  date: [
+    { label: "now()", value: "now()" },
+    { label: "CURRENT_DATE", value: "CURRENT_DATE" },
+  ],
+  time: [
+    { label: "now()", value: "now()" },
+    { label: "CURRENT_TIME", value: "CURRENT_TIME" },
+  ],
+  timetz: [
+    { label: "now()", value: "now()" },
+    { label: "CURRENT_TIME", value: "CURRENT_TIME" },
+  ],
+  timestamp: [
+    { label: "now()", value: "now()" },
+    { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP" },
+  ],
+  timestamptz: [
+    { label: "now()", value: "now()" },
+    { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP" },
+  ],
+  int2: [{ label: "0", value: "0" }],
+  int4: [{ label: "0", value: "0" }],
+  int8: [{ label: "0", value: "0" }],
+  float4: [{ label: "0", value: "0" }],
+  float8: [{ label: "0", value: "0" }],
+  numeric: [{ label: "0", value: "0" }],
+  bool: [
+    { label: "true", value: "true" },
+    { label: "false", value: "false" },
+  ],
+  uuid: [{ label: "gen_random_uuid()", value: "gen_random_uuid()" }],
+};
+
+function DefaultValueInput({
+  rawType,
+  value,
+  onChange,
+}: {
+  rawType: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const suggestions = DEFAULT_SUGGESTIONS[rawType] ?? [];
+
+  return (
+    <div className="space-y-2">
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {suggestions.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => onChange(value === s.value ? "" : s.value)}
+              className={`cursor-pointer px-2 py-0.5 rounded text-xs font-mono transition-colors border ${
+                value === s.value
+                  ? "bg-brand-500/20 border-brand-500 text-brand-400"
+                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="NULL"
+        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-brand-500 font-mono"
+      />
+      <p className="text-xs text-zinc-500">
+        Can be a literal or an expression, e.g. <code className="font-mono">(gen_random_uuid())</code>
+      </p>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
+
+const RESERVED_KEYS = new Set([
+  "id","name","email","email_verified","image","password_hash",
+  "phone","phone_verified","is_anonymous","metadata","banned_at",
+  "created_at","updated_at",
+]);
 
 interface AddColumnModalProps {
   existingKeys: string[];
-  onAdd: (col: UserColumnDef) => Promise<void>;
+  onAdd: (col: UserColumnDef & { rawType: string; defaultValue?: string; nullable?: boolean }) => Promise<void>;
   onClose: () => void;
   closing?: boolean;
 }
@@ -218,8 +304,9 @@ export function AddColumnModal({ existingKeys, onAdd, onClose, closing }: AddCol
   const [error, setError] = useState<string | null>(null);
 
   const key = toSnakeCase(name);
-  const keyConflict = key !== "" && existingKeys.includes(key);
-  const canSave = name.trim().length > 0 && key.length > 0 && !keyConflict && rawType !== "" && !saving;
+  const isReserved = key !== "" && RESERVED_KEYS.has(key);
+  const keyConflict = key !== "" && !isReserved && existingKeys.includes(key);
+  const canSave = name.trim().length > 0 && key.length > 0 && !isReserved && !keyConflict && rawType !== "" && !saving;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -245,10 +332,17 @@ export function AddColumnModal({ existingKeys, onAdd, onClose, closing }: AddCol
     setSaving(true);
     setError(null);
     try {
-      await onAdd({ key, label: name.trim(), type: toColumnDefType(rawType) });
+      await onAdd({
+        key,
+        label: name.trim(),
+        type: toColumnDefType(rawType),
+        rawType,
+        defaultValue: defaultValue || undefined,
+        nullable: isNullable,
+      });
       if (createMore) reset();
-    } catch {
-      setError("Failed to save column. Please try again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save column. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -271,112 +365,91 @@ export function AddColumnModal({ existingKeys, onAdd, onClose, closing }: AddCol
         </div>
 
         {/* Body */}
-        <form id="add-col-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto divide-y divide-zinc-800">
+        <form id="add-col-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
 
           {/* General */}
-          <div className="flex px-6 py-6 gap-6">
-            <div className="w-36 shrink-0">
-              <p className="text-sm font-medium text-zinc-300">General</p>
+          <div className="px-6 py-6 space-y-4 border-b border-zinc-800">
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">General</p>
+            <div>
+              <label className="block text-sm text-zinc-300 mb-1.5">Name</label>
+              <input
+                autoFocus
+                value={name}
+                onChange={(e) => { setName(e.target.value); setError(null); }}
+                placeholder="column_name"
+                maxLength={64}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+              />
+              {key ? (
+                <p className={`text-xs mt-1.5 ${isReserved ? "text-amber-400" : keyConflict ? "text-red-400" : "text-zinc-500"}`}>
+                  {isReserved
+                    ? <><code className="font-mono">{key}</code> is a reserved built-in column</>
+                    : keyConflict
+                    ? <>Key <code className="font-mono">{key}</code> already exists</>
+                    : <>Stored as <code className="font-mono">{key}</code> in user metadata</>
+                  }
+                </p>
+              ) : (
+                <p className="text-xs mt-1.5 text-zinc-500">
+                  Use lowercase with underscores e.g. <code className="font-mono">column_name</code>
+                </p>
+              )}
             </div>
-            <div className="flex-1 space-y-4">
-              <div>
-                <label className="block text-sm text-zinc-300 mb-1.5">Name</label>
-                <input
-                  autoFocus
-                  value={name}
-                  onChange={(e) => { setName(e.target.value); setError(null); }}
-                  placeholder="column_name"
-                  maxLength={64}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-brand-500"
-                />
-                {key && (
-                  <p className={`text-xs mt-1.5 ${keyConflict ? "text-red-400" : "text-zinc-500"}`}>
-                    {keyConflict
-                      ? <>Key <code className="font-mono">{key}</code> already exists</>
-                      : <>Stored as <code className="font-mono">{key}</code> in user metadata</>
-                    }
-                  </p>
-                )}
-                {!key && (
-                  <p className="text-xs mt-1.5 text-zinc-500">
-                    Recommended to use lowercase and use an underscore to separate words e.g. <code className="font-mono">column_name</code>
-                  </p>
-                )}
+            <div>
+              <div className="flex justify-between mb-1.5">
+                <label className="text-sm text-zinc-300">Description</label>
+                <span className="text-xs text-zinc-600">Optional</span>
               </div>
-              <div>
-                <div className="flex justify-between mb-1.5">
-                  <label className="text-sm text-zinc-300">Description</label>
-                  <span className="text-xs text-zinc-600">Optional</span>
-                </div>
-                <input
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-brand-500"
-                />
-              </div>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+              />
             </div>
           </div>
 
           {/* Data Type */}
-          <div className="flex px-6 py-6 gap-6">
-            <div className="w-36 shrink-0 space-y-2.5">
-              <p className="text-sm font-medium text-zinc-300">Data Type</p>
-              <button type="button" className="cursor-pointer flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-700 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors w-full">
-                <ExternalLink size={11} /> About data types
+          <div className="px-6 py-6 space-y-4 border-b border-zinc-800">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Data Type</p>
+              <button type="button" className="cursor-pointer flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+                <ExternalLink size={10} /> About data types
               </button>
             </div>
-            <div className="flex-1 space-y-4">
-              <div>
-                <label className="block text-sm text-zinc-300 mb-1.5">Type</label>
-                <TypePicker value={rawType} onChange={setRawType} />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-300 mb-1.5">Default Value</label>
-                <input
-                  value={defaultValue}
-                  onChange={(e) => setDefaultValue(e.target.value)}
-                  placeholder="NULL"
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-brand-500 font-mono"
-                />
-                <p className="text-xs text-zinc-500 mt-1.5">
-                  Can either be a literal or an expression. When using an expression wrap it in brackets, e.g. <code className="font-mono">(gen_random_uuid())</code>
-                </p>
-              </div>
+            <div>
+              <label className="block text-sm text-zinc-300 mb-1.5">Type</label>
+              <TypePicker value={rawType} onChange={setRawType} />
+            </div>
+            <div>
+              <label className="block text-sm text-zinc-300 mb-1.5">Default Value</label>
+              <DefaultValueInput rawType={rawType} value={defaultValue} onChange={setDefaultValue} />
             </div>
           </div>
 
           {/* Constraints */}
-          <div className="flex px-6 py-6 gap-6">
-            <div className="w-36 shrink-0">
-              <p className="text-sm font-medium text-zinc-300">Constraints</p>
-            </div>
-            <div className="flex-1 space-y-4">
-              <label className="flex items-start gap-3 cursor-pointer">
-                <div
-                  onClick={() => setIsNullable((v) => !v)}
-                  className={`cursor-pointer relative w-9 h-5 mt-0.5 rounded-full transition-colors shrink-0 ${isNullable ? "bg-brand-500" : "bg-zinc-700"}`}
-                >
-                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${isNullable ? "translate-x-4" : "translate-x-0"}`} />
-                </div>
-                <div>
-                  <p className="text-sm text-zinc-300">Allow Nullable</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">Allow the column to assume a NULL value if no value is provided</p>
-                </div>
-              </label>
-            </div>
+          <div className="px-6 py-6 space-y-4 border-b border-zinc-800">
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Constraints</p>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <div
+                onClick={() => setIsNullable((v) => !v)}
+                className={`cursor-pointer relative w-9 h-5 mt-0.5 rounded-full transition-colors shrink-0 ${isNullable ? "bg-brand-500" : "bg-zinc-700"}`}
+              >
+                <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${isNullable ? "translate-x-4" : "translate-x-0"}`} />
+              </div>
+              <div>
+                <p className="text-sm text-zinc-300">Allow Nullable</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Allow the column to assume a NULL value if no value is provided</p>
+              </div>
+            </label>
           </div>
 
           {/* Note */}
-          <div className="flex px-6 py-6 gap-6">
-            <div className="w-36 shrink-0">
-              <p className="text-sm font-medium text-zinc-300">Note</p>
-            </div>
-            <div className="flex-1">
-              <p className="text-xs text-zinc-500 leading-relaxed">
-                Custom columns are stored in each user&apos;s <code className="font-mono text-zinc-400">metadata</code> field.
-                Fundamental auth fields (email, password, verified status) are read-only and cannot be modified here.
-              </p>
-            </div>
+
+          <div className="px-6 py-6">
+            <p className="text-xs text-zinc-600 leading-relaxed">
+              Custom columns are stored in each user&apos;s <code className="font-mono text-zinc-500">metadata</code> field.
+              Fundamental auth fields (email, password, verified status) are read-only and cannot be modified here.
+            </p>
           </div>
 
           {error && (

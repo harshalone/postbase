@@ -62,7 +62,23 @@
       "Bash(grep -v \"^$\")",
       "Bash(grep -r DATABASE_URL .env*)",
       "Bash(psql \"postgresql://postbase:postbase@localhost:5432/postbase\" -c \"\\\\d _postbase.projects\")",
-      "Bash(wc -l /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)"
+      "Bash(wc -l /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)",
+      "Read(//Volumes/2TB/code/docker/**)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js\\)$\")",
+      "Bash(wc -l /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/users/page.tsx)",
+      "Bash(grep -r \"_postbase.*users\\\\|CREATE TABLE.*users\" /Volumes/2TB/code/postbase.com --include=*.sql --include=*.ts --include=*.tsx --include=*.js --include=*.sh)",
+      "Bash(grep -n \"storageObjects\\\\|ownerId\\\\|owner_id\" /Volumes/2TB/code/postbase.com/apps/web/src/app/api/storage/v1/object/[bucket]/[...path]/route.ts)",
+      "Bash(grep -n \"databaseUrl\\\\|getProjectPool\\\\|getProjectSchema\\\\|withProjectSchema\" /Volumes/2TB/code/postbase.com/apps/web/src/app/api/storage/v1/object/[bucket]/[...path]/route.ts)",
+      "Bash(cat /Volumes/2TB/code/postbase.com/apps/web/src/app/api/auth/v1/[projectId]/signup/route.ts)",
+      "Bash(pnpm --filter web db:push)",
+      "Bash(grep -n \"alert\\\\|notification\\\\|message\\\\|toast\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx -i)",
+      "Bash(grep -n \"alert\\\\|notification\\\\|message\\\\|toast\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/integrations/page.tsx -i)",
+      "Bash(grep -n \"alert\\\\|notification\\\\|toast\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/users/_components/users-table.tsx -i)",
+      "Bash(cat /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)",
+      "Bash(ls /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/storage/page.tsx)",
+      "Bash(wc -l /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/storage/page.tsx)",
+      "Bash(head -10 /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)",
+      "Bash(head -10 /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/integrations/page.tsx)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
@@ -70,7 +86,8 @@
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/auth/providers",
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/[projectId]",
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]",
-      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/auth/v1/[projectId]"
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/auth/v1/[projectId]",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/[projectId]/user-columns"
     ]
   }
 }

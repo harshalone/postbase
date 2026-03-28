@@ -21,6 +21,12 @@ echo "==> Applying schema patches..."
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 ALTER TABLE "_postbase"."email_settings" ADD COLUMN IF NOT EXISTS "ses_smtp_username" text;
 ALTER TABLE "_postbase"."email_settings" ADD COLUMN IF NOT EXISTS "ses_smtp_password" text;
+
+-- Drop FK constraints before migration 0003 attempts to drop the shared auth tables
+ALTER TABLE "_postbase"."storage_objects" DROP CONSTRAINT IF EXISTS "storage_objects_owner_id_users_id_fk";
+ALTER TABLE "_postbase"."audit_logs" DROP CONSTRAINT IF EXISTS "audit_logs_user_id_users_id_fk";
+
+-- Remove user_column_defs from projects if it somehow didn't get applied
 ALTER TABLE "_postbase"."projects" ADD COLUMN IF NOT EXISTS "user_column_defs" jsonb DEFAULT '[]'::jsonb;
 SQL
 echo "==> Migrations done."

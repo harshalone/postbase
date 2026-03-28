@@ -1,19 +1,13 @@
 /**
- * GET /api/auth/v1/[projectId]/user
- *
- * Get the currently authenticated user (server-verified via JWT).
- * Token provided via X-Postbase-Token header.
- *
- * PATCH /api/auth/v1/[projectId]/user
- * Update the current user's profile.
+ * GET /api/auth/v1/[projectId]/user  — get current authenticated user
+ * PATCH /api/auth/v1/[projectId]/user — update current user's profile
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
+import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
+import { PoolClient } from "pg";
 
 async function resolveUser(req: NextRequest, projectId: string) {
   const authHeader = req.headers.get("authorization");
@@ -32,28 +26,41 @@ async function resolveUser(req: NextRequest, projectId: string) {
   return { keyInfo, userId: payload.sub };
 }
 
+function formatUser(user: Record<string, unknown>) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    image: user.image,
+    emailVerified: !!user.email_verified,
+    phone: user.phone,
+    metadata: user.metadata,
+    createdAt: user.created_at,
+    updatedAt: user.updated_at,
+  };
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const { keyInfo, userId } = await resolveUser(req, projectId);
   if (!keyInfo) return Response.json({ error: "Missing API key" }, { status: 401 });
   if (!userId) return Response.json({ error: "Not authenticated" }, { status: 401 });
 
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) return Response.json({ error: "User not found" }, { status: 404 });
-
-  return Response.json({
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      image: user.image,
-      emailVerified: !!user.emailVerified,
-      phone: user.phone,
-      metadata: user.metadata,
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: user.updatedAt.toISOString(),
-    },
-  });
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
+    const { rows: [user] } = await client.query(
+      `SELECT * FROM "${schema}"."users" WHERE "id" = $1 LIMIT 1`,
+      [userId]
+    );
+    if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+    return Response.json({ user: formatUser(user) });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }
 
 const updateSchema = z.object({
@@ -76,28 +83,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pr
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (parsed.data.name !== undefined) updates.name = parsed.data.name;
-  if (parsed.data.image !== undefined) updates.image = parsed.data.image;
-  if (parsed.data.data !== undefined) updates.metadata = parsed.data.data;
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
 
-  const [user] = await db
-    .update(users)
-    .set(updates)
-    .where(eq(users.id, userId))
-    .returning();
+    const setClauses: string[] = [`"updated_at" = now()`];
+    const values: unknown[] = [];
+    let idx = 1;
 
-  return Response.json({
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      image: user.image,
-      emailVerified: !!user.emailVerified,
-      phone: user.phone,
-      metadata: user.metadata,
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: user.updatedAt.toISOString(),
-    },
-  });
+    if (parsed.data.name !== undefined) { setClauses.push(`"name" = $${idx++}`); values.push(parsed.data.name); }
+    if (parsed.data.image !== undefined) { setClauses.push(`"image" = $${idx++}`); values.push(parsed.data.image); }
+    if (parsed.data.data !== undefined) { setClauses.push(`"metadata" = $${idx++}`); values.push(JSON.stringify(parsed.data.data)); }
+
+    values.push(userId);
+    const { rows: [user] } = await client.query(
+      `UPDATE "${schema}"."users" SET ${setClauses.join(", ")} WHERE "id" = $${idx} RETURNING *`,
+      values
+    );
+
+    return Response.json({ user: formatUser(user) });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }

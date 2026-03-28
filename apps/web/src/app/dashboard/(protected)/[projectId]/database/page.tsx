@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, use } from "react";
 import { useSlidePanel } from "@/hooks/use-slide-panel";
+import { useToast } from "@/hooks/use-toast";
 import {
   Table2,
   Shield,
@@ -127,6 +128,7 @@ export default function DatabasePage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>("tables");
 
   // Tables state
@@ -268,7 +270,7 @@ export default function DatabasePage({
         body: JSON.stringify(filtered),
       });
       const data = await res.json();
-      if (data.error) { alert(data.error); return; }
+      if (data.error) { toast.error(data.error); return; }
       if (!createMoreRow) insertRowPanel.close();
       setInsertRowValues({});
       fetchTableRows(selectedTable, tableOffset);
@@ -289,7 +291,7 @@ export default function DatabasePage({
         body: JSON.stringify(insertColForm),
       });
       const data = await res.json();
-      if (data.error) { alert(data.error); return; }
+      if (data.error) { toast.error(data.error); return; }
       if (!createMoreCol) insertColPanel.close();
       setInsertColForm({ name: "", description: "", type: "", isArray: false, defaultValue: "", isPrimaryKey: false });
       fetchTables();
@@ -313,7 +315,7 @@ export default function DatabasePage({
       });
       const data = await res.json();
       if (data.error) {
-        alert(data.error);
+        toast.error(data.error);
         return;
       }
       newTablePanel.close();

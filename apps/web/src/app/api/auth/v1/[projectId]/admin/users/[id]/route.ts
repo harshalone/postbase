@@ -1,17 +1,15 @@
 /**
  * GET   /api/auth/v1/[projectId]/admin/users/[id]   — get user by id
  * PATCH /api/auth/v1/[projectId]/admin/users/[id]   — update user
- * DELETE /api/auth/v1/[projectId]/admin/users/[id]  — delete user
+ * DELETE /api/auth/v1/[projectId]/admin/users/[id]  — delete user (cascades sessions)
  *
  * All require service role key.
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { hash } from "bcryptjs";
-import { db } from "@/lib/db";
-import { users, sessions } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
+import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 
 async function requireServiceRole(req: NextRequest, projectId: string) {
   const authHeader = req.headers.get("authorization");
@@ -21,18 +19,18 @@ async function requireServiceRole(req: NextRequest, projectId: string) {
   return keyInfo;
 }
 
-function formatUser(user: typeof users.$inferSelect) {
+function formatUser(user: Record<string, unknown>) {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     image: user.image,
-    emailVerified: !!user.emailVerified,
+    emailVerified: !!user.email_verified,
     phone: user.phone,
     metadata: user.metadata,
-    bannedAt: user.bannedAt?.toISOString() ?? null,
-    createdAt: user.createdAt.toISOString(),
-    updatedAt: user.updatedAt.toISOString(),
+    bannedAt: user.banned_at ? new Date(user.banned_at as string).toISOString() : null,
+    createdAt: new Date(user.created_at as string).toISOString(),
+    updatedAt: new Date(user.updated_at as string).toISOString(),
   };
 }
 
@@ -44,14 +42,21 @@ export async function GET(
   const keyInfo = await requireServiceRole(req, projectId);
   if (!keyInfo) return Response.json({ error: "Service role key required" }, { status: 403 });
 
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.id, id), eq(users.projectId, keyInfo.projectId)))
-    .limit(1);
-
-  if (!user) return Response.json({ error: "User not found" }, { status: 404 });
-  return Response.json({ user: formatUser(user) });
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
+    const { rows: [user] } = await client.query(
+      `SELECT * FROM "${schema}"."users" WHERE "id" = $1 LIMIT 1`,
+      [id]
+    );
+    if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+    return Response.json({ user: formatUser(user) });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }
 
 const updateSchema = z.object({
@@ -77,21 +82,34 @@ export async function PATCH(
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (parsed.data.email !== undefined) updates.email = parsed.data.email;
-  if (parsed.data.password !== undefined) updates.passwordHash = await hash(parsed.data.password, 12);
-  if (parsed.data.user_metadata !== undefined) updates.metadata = parsed.data.user_metadata;
-  if (parsed.data.ban === true) updates.bannedAt = new Date();
-  if (parsed.data.ban === false) updates.bannedAt = null;
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
 
-  const [user] = await db
-    .update(users)
-    .set(updates)
-    .where(and(eq(users.id, id), eq(users.projectId, keyInfo.projectId)))
-    .returning();
+    const setClauses: string[] = [`"updated_at" = now()`];
+    const values: unknown[] = [];
+    let idx = 1;
 
-  if (!user) return Response.json({ error: "User not found" }, { status: 404 });
-  return Response.json({ user: formatUser(user) });
+    if (parsed.data.email !== undefined) { setClauses.push(`"email" = $${idx++}`); values.push(parsed.data.email); }
+    if (parsed.data.password !== undefined) { setClauses.push(`"password_hash" = $${idx++}`); values.push(await hash(parsed.data.password, 12)); }
+    if (parsed.data.user_metadata !== undefined) { setClauses.push(`"metadata" = $${idx++}`); values.push(JSON.stringify(parsed.data.user_metadata)); }
+    if (parsed.data.ban === true) { setClauses.push(`"banned_at" = now()`); }
+    if (parsed.data.ban === false) { setClauses.push(`"banned_at" = NULL`); }
+
+    values.push(id);
+    const { rows: [user] } = await client.query(
+      `UPDATE "${schema}"."users" SET ${setClauses.join(", ")} WHERE "id" = $${idx} RETURNING *`,
+      values
+    );
+
+    if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+    return Response.json({ user: formatUser(user) });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }
 
 export async function DELETE(
@@ -102,13 +120,22 @@ export async function DELETE(
   const keyInfo = await requireServiceRole(req, projectId);
   if (!keyInfo) return Response.json({ error: "Service role key required" }, { status: 403 });
 
-  await db.delete(sessions).where(eq(sessions.userId, id));
+  const schema = getProjectSchema(keyInfo.projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
 
-  const [deleted] = await db
-    .delete(users)
-    .where(and(eq(users.id, id), eq(users.projectId, keyInfo.projectId)))
-    .returning({ id: users.id });
+    // Sessions are CASCADE deleted by the FK constraint on the per-project table
+    const { rows: [deleted] } = await client.query(
+      `DELETE FROM "${schema}"."users" WHERE "id" = $1 RETURNING id`,
+      [id]
+    );
 
-  if (!deleted) return Response.json({ error: "User not found" }, { status: 404 });
-  return Response.json({ message: "User deleted" });
+    if (!deleted) return Response.json({ error: "User not found" }, { status: 404 });
+    return Response.json({ message: "User deleted" });
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }

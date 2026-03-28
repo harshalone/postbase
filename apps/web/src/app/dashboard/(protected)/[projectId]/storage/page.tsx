@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, use } from "react";
+import { useToast } from "@/hooks/use-toast";
 import {
   Plus,
   Trash2,
   RefreshCw,
   X,
-  CheckCircle2,
-  XCircle,
   Loader2,
   Star,
   Pencil,
@@ -401,6 +400,7 @@ export default function StoragePage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
+  const toast = useToast();
 
   const [connections, setConnections] = useState<StorageConnection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -408,7 +408,6 @@ export default function StoragePage({
   const [editTarget, setEditTarget] = useState<StorageConnection | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null); // connectionId being tested
-  const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<StorageConnection | null>(null);
 
   const fetchConnections = useCallback(async () => {
@@ -450,7 +449,7 @@ export default function StoragePage({
           }
         );
         const data = await res.json();
-        if (data.error) { alert(JSON.stringify(data.error)); return; }
+        if (data.error) { toast.error(typeof data.error === "string" ? data.error : JSON.stringify(data.error)); return; }
       } else {
         // POST new
         const res = await fetch(`/api/dashboard/${projectId}/storage`, {
@@ -463,7 +462,7 @@ export default function StoragePage({
           }),
         });
         const data = await res.json();
-        if (data.error) { alert(JSON.stringify(data.error)); return; }
+        if (data.error) { toast.error(typeof data.error === "string" ? data.error : JSON.stringify(data.error)); return; }
       }
 
       setShowForm(false);
@@ -480,14 +479,13 @@ export default function StoragePage({
       { method: "DELETE" }
     );
     const data = await res.json();
-    if (data.error) { alert(data.error); return; }
+    if (data.error) { toast.error(data.error); return; }
     setDeleteConfirm(null);
     fetchConnections();
   }
 
   async function handleTest(conn: StorageConnection) {
     setTesting(conn.id);
-    setTestResult(null);
     try {
       const res = await fetch(
         `/api/dashboard/${projectId}/storage/${conn.id}`,
@@ -498,7 +496,11 @@ export default function StoragePage({
         }
       );
       const data = await res.json();
-      setTestResult({ id: conn.id, ...data });
+      if (data.success) {
+        toast.success("Connection successful", data.message);
+      } else {
+        toast.error("Connection failed", data.message);
+      }
     } finally {
       setTesting(null);
     }
@@ -516,13 +518,11 @@ export default function StoragePage({
   function openAdd() {
     setEditTarget(null);
     setShowForm(true);
-    setTestResult(null);
   }
 
   function openEdit(conn: StorageConnection) {
     setEditTarget(conn);
     setShowForm(true);
-    setTestResult(null);
   }
 
   const formInitial: FormState = editTarget
@@ -609,35 +609,6 @@ export default function StoragePage({
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
-
-        {/* Test result toast */}
-        {testResult && (
-          <div
-            className={`fixed bottom-6 right-6 flex items-start gap-3 px-4 py-3 rounded-xl border shadow-2xl max-w-sm z-50 ${
-              testResult.success
-                ? "bg-zinc-900 border-green-700 text-green-300"
-                : "bg-zinc-900 border-red-700 text-red-300"
-            }`}
-          >
-            {testResult.success ? (
-              <CheckCircle2 size={18} className="shrink-0 mt-0.5" />
-            ) : (
-              <XCircle size={18} className="shrink-0 mt-0.5" />
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">
-                {testResult.success ? "Connection successful" : "Connection failed"}
-              </p>
-              <p className="text-xs mt-0.5 opacity-75">{testResult.message}</p>
-            </div>
-            <button
-              onClick={() => setTestResult(null)}
-              className="cursor-pointer shrink-0 text-zinc-600 hover:text-zinc-300"
-            >
-              <X size={14} />
-            </button>
           </div>
         )}
 
