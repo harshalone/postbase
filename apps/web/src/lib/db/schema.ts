@@ -221,6 +221,9 @@ export const emailSettings = postbaseSchema.table("email_settings", {
   sesAccessKeyId: text("ses_access_key_id"),
   sesSecretAccessKey: text("ses_secret_access_key"),
   sesFrom: text("ses_from"),
+  // AWS SES SMTP credentials (alternative to IAM keys)
+  sesSmtpUsername: text("ses_smtp_username"),
+  sesSmtpPassword: text("ses_smtp_password"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

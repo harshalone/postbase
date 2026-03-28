@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Server, Cloud, CheckCircle2, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Server, Cloud, CheckCircle2, Loader2, Upload, KeyRound } from "lucide-react";
 
 type EmailProvider = "smtp" | "ses";
+type SesInputMode = "iam" | "smtp";
 
 interface Settings {
   provider: EmailProvider;
@@ -17,6 +18,8 @@ interface Settings {
   sesAccessKeyId: string;
   sesSecretAccessKey: string;
   sesFrom: string;
+  sesSmtpUsername: string;
+  sesSmtpPassword: string;
 }
 
 const DEFAULT: Settings = {
@@ -31,14 +34,46 @@ const DEFAULT: Settings = {
   sesAccessKeyId: "",
   sesSecretAccessKey: "",
   sesFrom: "",
+  sesSmtpUsername: "",
+  sesSmtpPassword: "",
 };
+
+// Parse an AWS SES SMTP credentials CSV.
+// AWS exports a CSV (with optional BOM) with headers on row 1 and values on row 2.
+// Known formats:
+//   "IAM user name,SMTP user name,SMTP password"
+//   "IAM User Arn,SMTP endpoint,SMTP username,SMTP password"
+function parseSesCsv(text: string): { smtpUsername: string; smtpPassword: string } | null {
+  // Strip UTF-8 BOM if present
+  const clean = text.replace(/^\uFEFF/, "").trim();
+  const lines = clean.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length < 2) return null;
+
+  const headers = lines[0].split(",").map((h) => h.replace(/"/g, "").trim().toLowerCase());
+  const values = lines[1].split(",").map((v) => v.replace(/"/g, "").trim());
+
+  const get = (key: string) => {
+    const idx = headers.findIndex((h) => h.includes(key));
+    return idx >= 0 ? (values[idx] ?? "") : "";
+  };
+
+  // "SMTP user name" (new format) or "SMTP username" (old format)
+  const smtpUsername = get("smtp user name") || get("smtp username") || get("username");
+  const smtpPassword = get("smtp password") || get("password");
+
+  if (!smtpUsername || !smtpPassword) return null;
+  return { smtpUsername, smtpPassword };
+}
 
 export function EmailSettingsForm({ projectId }: { projectId: string }) {
   const [settings, setSettings] = useState<Settings>(DEFAULT);
   const [activeTab, setActiveTab] = useState<EmailProvider>("smtp");
+  const [sesInputMode, setSesInputMode] = useState<SesInputMode>("iam");
+  const [csvError, setCsvError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch(`/api/dashboard/email-settings?projectId=${projectId}`)
@@ -57,8 +92,14 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
             sesAccessKeyId: s.sesAccessKeyId ?? "",
             sesSecretAccessKey: s.sesSecretAccessKey ?? "",
             sesFrom: s.sesFrom ?? "",
+            sesSmtpUsername: s.sesSmtpUsername ?? "",
+            sesSmtpPassword: s.sesSmtpPassword ?? "",
           });
           setActiveTab(s.provider ?? "smtp");
+          // If SMTP credentials exist but no IAM keys, default to SMTP mode
+          if (s.sesSmtpUsername && !s.sesAccessKeyId) {
+            setSesInputMode("smtp");
+          }
         }
       })
       .finally(() => setLoading(false));
@@ -66,6 +107,25 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
 
   function set<K extends keyof Settings>(key: K, value: Settings[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleCsvFile(file: File) {
+    setCsvError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const parsed = parseSesCsv(text);
+      if (!parsed) {
+        setCsvError("Could not parse the CSV. Make sure it's the file downloaded from AWS SES.");
+        return;
+      }
+      setSettings((prev) => ({
+        ...prev,
+        sesSmtpUsername: parsed.smtpUsername,
+        sesSmtpPassword: parsed.smtpPassword,
+      }));
+    };
+    reader.readAsText(file);
   }
 
   async function save() {
@@ -88,6 +148,8 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
           sesAccessKeyId: settings.sesAccessKeyId || undefined,
           sesSecretAccessKey: settings.sesSecretAccessKey || undefined,
           sesFrom: settings.sesFrom || undefined,
+          sesSmtpUsername: settings.sesSmtpUsername || undefined,
+          sesSmtpPassword: settings.sesSmtpPassword || undefined,
         }),
       });
       setSaved(true);
@@ -108,6 +170,11 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
   const SUB_TABS = [
     { id: "smtp" as const, label: "SMTP", icon: Server },
     { id: "ses" as const, label: "AWS SES", icon: Cloud },
+  ];
+
+  const SES_INPUT_MODES = [
+    { id: "iam" as const, label: "IAM Access Keys", icon: KeyRound },
+    { id: "smtp" as const, label: "SMTP Credentials", icon: Upload },
   ];
 
   return (
@@ -223,8 +290,32 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
       {/* AWS SES Form */}
       {activeTab === "ses" && (
         <div className="space-y-5">
+          {/* Credential type toggle */}
+          <div className="flex items-center gap-1 border border-zinc-800 rounded-lg p-1 inline-flex bg-zinc-900">
+            {SES_INPUT_MODES.map((mode) => {
+              const Icon = mode.icon;
+              const active = sesInputMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  onClick={() => { setSesInputMode(mode.id); setCsvError(null); }}
+                  className={`cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    active
+                      ? "bg-zinc-800 text-white shadow-sm"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  <Icon size={12} className="shrink-0" />
+                  {mode.label}
+                </button>
+              );
+            })}
+          </div>
+
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 space-y-4">
             <h3 className="text-sm font-semibold text-zinc-300">AWS SES Configuration</h3>
+
+            {/* Region — shared by both modes */}
             <div>
               <label className="block text-xs text-zinc-500 mb-1.5">AWS Region</label>
               <select
@@ -244,27 +335,107 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
                 <option value="ap-northeast-1">Asia Pacific (Tokyo) — ap-northeast-1</option>
                 <option value="sa-east-1">South America (São Paulo) — sa-east-1</option>
               </select>
+              {sesInputMode === "smtp" && (
+                <p className="mt-1.5 text-xs text-zinc-600">
+                  Must match the region where you created your SMTP credentials in AWS SES. Used to build the SMTP endpoint: <span className="font-mono text-zinc-500">email-smtp.{settings.sesRegion}.amazonaws.com</span>
+                </p>
+              )}
             </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1.5">Access Key ID</label>
-              <input
-                type="text"
-                value={settings.sesAccessKeyId}
-                onChange={(e) => set("sesAccessKeyId", e.target.value)}
-                placeholder="AKIAIOSFODNN7EXAMPLE"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600 font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1.5">Secret Access Key</label>
-              <input
-                type="password"
-                value={settings.sesSecretAccessKey}
-                onChange={(e) => set("sesSecretAccessKey", e.target.value)}
-                placeholder="••••••••••••••••••••••••••••••••••••••••"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
-              />
-            </div>
+
+            {/* IAM Access Keys mode */}
+            {sesInputMode === "iam" && (
+              <>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1.5">Access Key ID</label>
+                  <input
+                    type="text"
+                    value={settings.sesAccessKeyId}
+                    onChange={(e) => set("sesAccessKeyId", e.target.value)}
+                    placeholder="AKIAIOSFODNN7EXAMPLE"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1.5">Secret Access Key</label>
+                  <input
+                    type="password"
+                    value={settings.sesSecretAccessKey}
+                    onChange={(e) => set("sesSecretAccessKey", e.target.value)}
+                    placeholder="••••••••••••••••••••••••••••••••••••••••"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* SMTP Credentials mode */}
+            {sesInputMode === "smtp" && (
+              <>
+                {/* CSV upload area */}
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1.5">Upload Credentials CSV</label>
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const file = e.dataTransfer.files[0];
+                      if (file) handleCsvFile(file);
+                    }}
+                    className="cursor-pointer flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-zinc-700 bg-zinc-800/50 px-4 py-5 text-center hover:border-zinc-500 transition-colors"
+                  >
+                    <Upload size={16} className="text-zinc-500" />
+                    <p className="text-xs text-zinc-500">
+                      Drop the <span className="text-zinc-300 font-medium">smtp_credentials.csv</span> file here, or{" "}
+                      <span className="text-brand-400">click to browse</span>
+                    </p>
+                    <p className="text-xs text-zinc-600">Downloaded from AWS SES → SMTP settings → Create SMTP credentials</p>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleCsvFile(file);
+                    }}
+                  />
+                  {csvError && (
+                    <p className="mt-1.5 text-xs text-red-400">{csvError}</p>
+                  )}
+                  {settings.sesSmtpUsername && !csvError && (
+                    <p className="mt-1.5 text-xs text-green-400 flex items-center gap-1">
+                      <CheckCircle2 size={12} /> Credentials loaded from CSV
+                    </p>
+                  )}
+                </div>
+
+                {/* Manual entry fields (also populated by CSV) */}
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1.5">SMTP Username</label>
+                  <input
+                    type="text"
+                    value={settings.sesSmtpUsername}
+                    onChange={(e) => set("sesSmtpUsername", e.target.value)}
+                    placeholder="AKIAIOSFODNN7EXAMPLE"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1.5">SMTP Password</label>
+                  <input
+                    type="password"
+                    value={settings.sesSmtpPassword}
+                    onChange={(e) => set("sesSmtpPassword", e.target.value)}
+                    placeholder="••••••••••••••••••••••••••••••••••••••••"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* From address — shared by both modes */}
             <div>
               <label className="block text-xs text-zinc-500 mb-1.5">From Address</label>
               <input
@@ -279,9 +450,15 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
           </div>
 
           <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 p-4">
-            <p className="text-xs text-amber-400/80 leading-relaxed">
-              <span className="text-amber-400 font-medium">Note:</span> Your AWS IAM user must have the <code className="bg-amber-950/40 px-1 rounded">ses:SendEmail</code> and <code className="bg-amber-950/40 px-1 rounded">ses:SendRawEmail</code> permissions. Your sending domain or email address must be verified in AWS SES.
-            </p>
+            {sesInputMode === "iam" ? (
+              <p className="text-xs text-amber-400/80 leading-relaxed">
+                <span className="text-amber-400 font-medium">Note:</span> Your AWS IAM user must have the <code className="bg-amber-950/40 px-1 rounded">ses:SendEmail</code> and <code className="bg-amber-950/40 px-1 rounded">ses:SendRawEmail</code> permissions. Your sending domain or email address must be verified in AWS SES.
+              </p>
+            ) : (
+              <p className="text-xs text-amber-400/80 leading-relaxed">
+                <span className="text-amber-400 font-medium">Note:</span> Generate SMTP credentials in the AWS SES console under <span className="text-amber-400">SMTP settings → Create SMTP credentials</span>. Download the CSV and upload it above, or paste the values manually.
+              </p>
+            )}
           </div>
         </div>
       )}

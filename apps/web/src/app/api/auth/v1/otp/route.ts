@@ -73,7 +73,12 @@ export async function POST(req: NextRequest) {
     .where(eq(emailSettings.projectId, keyInfo.projectId))
     .limit(1);
 
-  if (!settings?.smtpHost) {
+  const isSmtpConfigured = settings?.provider === "smtp" && settings.smtpHost;
+  const isSesIamConfigured = settings?.provider === "ses" && settings.sesAccessKeyId && settings.sesSecretAccessKey;
+  const isSesSmtpConfigured = settings?.provider === "ses" && settings.sesSmtpUsername && settings.sesSmtpPassword;
+  const emailConfigured = isSmtpConfigured || isSesIamConfigured || isSesSmtpConfigured;
+
+  if (!emailConfigured) {
     // No email configured — in dev, just return the link
     if (process.env.NODE_ENV === "development") {
       return Response.json({ message: "OTP sent", _dev_magic_link: magicLink });
@@ -93,17 +98,43 @@ export async function POST(req: NextRequest) {
     ? template.body.replace("{{magic_link}}", magicLink).replace("{{email}}", email)
     : `<p>Click <a href="${magicLink}">here</a> to sign in.</p>`;
 
-  const transporter = createTransport({
-    host: settings.smtpHost,
-    port: settings.smtpPort ?? 587,
-    secure: settings.smtpSecure ?? true,
-    auth: settings.smtpUser
-      ? { user: settings.smtpUser, pass: settings.smtpPassword ?? "" }
-      : undefined,
-  });
+  let transportConfig: Parameters<typeof createTransport>[0];
+
+  if (isSesSmtpConfigured) {
+    // AWS SES via SMTP credentials (downloaded CSV)
+    const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
+    transportConfig = {
+      host: sesSmtpHost,
+      port: 587,
+      secure: false,
+      auth: { user: settings.sesSmtpUsername!, pass: settings.sesSmtpPassword! },
+    };
+  } else if (isSesIamConfigured) {
+    // AWS SES via IAM access keys — use SES SMTP endpoint with STARTTLS
+    // IAM keys are used directly as SMTP credentials for the SES SMTP interface
+    const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
+    transportConfig = {
+      host: sesSmtpHost,
+      port: 587,
+      secure: false,
+      auth: { user: settings.sesAccessKeyId!, pass: settings.sesSecretAccessKey! },
+    };
+  } else {
+    // Standard SMTP
+    transportConfig = {
+      host: settings.smtpHost!,
+      port: settings.smtpPort ?? 587,
+      secure: settings.smtpSecure ?? true,
+      auth: settings.smtpUser
+        ? { user: settings.smtpUser, pass: settings.smtpPassword ?? "" }
+        : undefined,
+    };
+  }
+
+  const transporter = createTransport(transportConfig);
 
   await transporter.sendMail({
-    from: settings.smtpFrom ?? settings.smtpUser ?? undefined,
+    from: settings.sesFrom ?? settings.smtpFrom ?? settings.smtpUser ?? undefined,
     to: email,
     subject,
     html: htmlBody,

@@ -19,6 +19,8 @@ const schema = z.object({
   sesAccessKeyId: z.string().optional(),
   sesSecretAccessKey: z.string().optional(),
   sesFrom: z.string().optional(),
+  sesSmtpUsername: z.string().optional(),
+  sesSmtpPassword: z.string().optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -63,6 +65,8 @@ export async function POST(req: NextRequest) {
     sesAccessKeyId: data.sesAccessKeyId ?? null,
     sesSecretAccessKey: data.sesSecretAccessKey ?? null,
     sesFrom: data.sesFrom ?? null,
+    sesSmtpUsername: data.sesSmtpUsername ?? null,
+    sesSmtpPassword: data.sesSmtpPassword ?? null,
     updatedAt: new Date(),
   };
 

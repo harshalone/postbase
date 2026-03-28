@@ -15,6 +15,13 @@
       "when": 1774376210708,
       "tag": "0001_stiff_zombie",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774703601991,
+      "tag": "0002_soft_sabra",
+      "breakpoints": true
     }
   ]
 }
