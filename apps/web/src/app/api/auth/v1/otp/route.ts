@@ -13,6 +13,7 @@ import { eq, and } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 import { nanoid } from "nanoid";
 import { createTransport } from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
 const bodySchema = z.object({
   email: z.string().email(),
@@ -98,7 +99,7 @@ export async function POST(req: NextRequest) {
     ? template.body.replace("{{magic_link}}", magicLink).replace("{{email}}", email)
     : `<p>Click <a href="${magicLink}">here</a> to sign in.</p>`;
 
-  let transportConfig: Parameters<typeof createTransport>[0];
+  let transportConfig: SMTPTransport.Options;
 
   if (isSesSmtpConfigured) {
     // AWS SES via SMTP credentials (downloaded CSV)
