@@ -3,6 +3,7 @@ import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { KeyRow } from "./key-row";
+import { CopyButton } from "./copy-button";
 import { PageHeader } from "../_components/page-header";
 
 export default async function ApiKeysPage({
@@ -29,6 +30,36 @@ export default async function ApiKeysPage({
           <p className="text-xs text-zinc-500 mb-6">ID: {project.id}</p>
 
           <div className="space-y-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium text-zinc-200">URL</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">public</span>
+              </div>
+              <p className="text-xs text-zinc-500 mb-2">The base URL of this postbase instance.</p>
+              <div className="flex items-start gap-2">
+                <code className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-xs text-zinc-300 font-mono break-all">
+                  {process.env.NEXTAUTH_URL ?? "http://localhost:3000"}
+                </code>
+                <div className="shrink-0">
+                  <CopyButton value={process.env.NEXTAUTH_URL ?? "http://localhost:3000"} />
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium text-zinc-200">Project ID</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">public</span>
+              </div>
+              <p className="text-xs text-zinc-500 mb-2">Identifies this project in all API calls.</p>
+              <div className="flex items-start gap-2">
+                <code className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-xs text-zinc-300 font-mono break-all">
+                  {projectId}
+                </code>
+                <div className="shrink-0">
+                  <CopyButton value={projectId} />
+                </div>
+              </div>
+            </div>
             <KeyRow
               projectId={projectId}
               label="Anon Key"
@@ -52,9 +83,18 @@ export default async function ApiKeysPage({
             <pre className="bg-zinc-800 rounded-lg p-3 text-xs text-zinc-300 overflow-x-auto">
               {`import { createClient } from '@postbase/client'
 
+// Anon client (browser-safe, respects RLS)
 const postbase = createClient(
   '${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}',
+  '${projectId}',
   '${project.anonKey}'
+)
+
+// Service role client (server-side only, bypasses RLS)
+const postbaseAdmin = createClient(
+  '${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}',
+  '${projectId}',
+  '${project.serviceRoleKey}'
 )`}
             </pre>
           </div>

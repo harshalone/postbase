@@ -1,10 +1,10 @@
 /**
- * GET /api/auth/v1/user
+ * GET /api/auth/v1/[projectId]/user
  *
  * Get the currently authenticated user (server-verified via JWT).
- * Token provided via X-Postbase-Token header or Authorization: Bearer <jwt>
+ * Token provided via X-Postbase-Token header.
  *
- * PATCH /api/auth/v1/user
+ * PATCH /api/auth/v1/[projectId]/user
  * Update the current user's profile.
  */
 import { NextRequest } from "next/server";
@@ -15,11 +15,11 @@ import { eq } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
 
-async function resolveUser(req: NextRequest) {
+async function resolveUser(req: NextRequest, projectId: string) {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return { keyInfo: null, userId: null };
 
-  const keyInfo = await validateApiKey(authHeader.slice(7));
+  const keyInfo = await validateApiKey(authHeader.slice(7), projectId);
   if (!keyInfo) return { keyInfo: null, userId: null };
 
   const token = req.headers.get("x-postbase-token");
@@ -32,8 +32,9 @@ async function resolveUser(req: NextRequest) {
   return { keyInfo, userId: payload.sub };
 }
 
-export async function GET(req: NextRequest) {
-  const { keyInfo, userId } = await resolveUser(req);
+export async function GET(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  const { keyInfo, userId } = await resolveUser(req, projectId);
   if (!keyInfo) return Response.json({ error: "Missing API key" }, { status: 401 });
   if (!userId) return Response.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -61,8 +62,9 @@ const updateSchema = z.object({
   data: z.record(z.unknown()).optional(),
 });
 
-export async function PATCH(req: NextRequest) {
-  const { keyInfo, userId } = await resolveUser(req);
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  const { keyInfo, userId } = await resolveUser(req, projectId);
   if (!keyInfo) return Response.json({ error: "Missing API key" }, { status: 401 });
   if (!userId) return Response.json({ error: "Not authenticated" }, { status: 401 });
 

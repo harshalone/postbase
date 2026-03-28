@@ -1,5 +1,5 @@
 /**
- * GET /api/auth/v1/verify
+ * GET /api/auth/v1/[projectId]/verify
  *
  * Verify a magic link token. Called when user clicks the email link.
  * Query params: token, email, redirectTo?
@@ -13,7 +13,8 @@ import { eq, and, gt } from "drizzle-orm";
 import { signJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";
 import { nanoid } from "nanoid";
 
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
   const { searchParams } = req.nextUrl;
   const token = searchParams.get("token");
   const email = searchParams.get("email");
@@ -27,31 +28,31 @@ export async function GET(req: NextRequest) {
   const [vt] = await db
     .select()
     .from(verificationTokens)
-    .where(and(eq(verificationTokens.identifier, email), eq(verificationTokens.token, token), gt(verificationTokens.expires, now)))
+    .where(and(
+      eq(verificationTokens.identifier, email),
+      eq(verificationTokens.token, token),
+      gt(verificationTokens.expires, now)
+    ))
     .limit(1);
 
   if (!vt) {
     return Response.json({ error: "Invalid or expired token" }, { status: 400 });
   }
 
-  // Delete used token
   await db
     .delete(verificationTokens)
     .where(and(eq(verificationTokens.identifier, email), eq(verificationTokens.token, token)));
 
-  // Find or create user — we need the projectId but it's not in the token table
-  // The user was pre-created in /otp, look them up
   const [user] = await db
     .select()
     .from(users)
-    .where(eq(users.email, email))
+    .where(and(eq(users.email, email), eq(users.projectId, projectId)))
     .limit(1);
 
   if (!user) {
     return Response.json({ error: "User not found" }, { status: 404 });
   }
 
-  // Mark email as verified
   if (!user.emailVerified) {
     await db.update(users).set({ emailVerified: now }).where(eq(users.id, user.id));
   }
@@ -76,7 +77,6 @@ export async function GET(req: NextRequest) {
     expires: new Date(refreshExpiresAt * 1000),
   }).onConflictDoNothing();
 
-  // Set session cookie and redirect
   const response = Response.redirect(new URL(redirectTo, req.url));
   const cookieOpts = [
     `postbase-session=${refreshToken}`,

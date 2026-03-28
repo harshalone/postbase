@@ -1,5 +1,5 @@
 /**
- * POST /api/auth/v1/otp
+ * POST /api/auth/v1/[projectId]/otp
  *
  * Send a magic link / OTP to the user's email.
  * Requires: Authorization: Bearer <anon-key>
@@ -20,12 +20,14 @@ const bodySchema = z.object({
   redirectTo: z.string().url().optional(),
 });
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return Response.json({ error: "Missing API key" }, { status: 401 });
   }
-  const keyInfo = await validateApiKey(authHeader.slice(7));
+  const keyInfo = await validateApiKey(authHeader.slice(7), projectId);
   if (!keyInfo) return Response.json({ error: "Invalid API key" }, { status: 401 });
 
   let body: unknown;
@@ -38,7 +40,6 @@ export async function POST(req: NextRequest) {
 
   const { email, redirectTo } = parsed.data;
 
-  // Ensure user exists (or create a placeholder)
   let [user] = await db
     .select({ id: users.id })
     .from(users)
@@ -53,21 +54,15 @@ export async function POST(req: NextRequest) {
     user = newUser;
   }
 
-  // Create verification token (valid 1 hour)
   const token = nanoid(64);
   const expires = new Date(Date.now() + 60 * 60 * 1000);
 
-  await db
-    .delete(verificationTokens)
-    .where(eq(verificationTokens.identifier, email));
-
+  await db.delete(verificationTokens).where(eq(verificationTokens.identifier, email));
   await db.insert(verificationTokens).values({ identifier: email, token, expires });
 
-  // Build magic link
   const baseUrl = process.env.NEXTAUTH_URL ?? req.nextUrl.origin;
-  const magicLink = `${baseUrl}/api/auth/v1/verify?token=${token}&email=${encodeURIComponent(email)}${redirectTo ? `&redirectTo=${encodeURIComponent(redirectTo)}` : ""}`;
+  const magicLink = `${baseUrl}/api/auth/v1/${projectId}/verify?token=${token}&email=${encodeURIComponent(email)}${redirectTo ? `&redirectTo=${encodeURIComponent(redirectTo)}` : ""}`;
 
-  // Get email settings for this project
   const [settings] = await db
     .select()
     .from(emailSettings)
@@ -80,14 +75,12 @@ export async function POST(req: NextRequest) {
   const emailConfigured = isSmtpConfigured || isSesIamConfigured || isSesSmtpConfigured;
 
   if (!emailConfigured) {
-    // No email configured — in dev, just return the link
     if (process.env.NODE_ENV === "development") {
       return Response.json({ message: "OTP sent", _dev_magic_link: magicLink });
     }
     return Response.json({ error: "Email not configured for this project" }, { status: 500 });
   }
 
-  // Get template
   const [template] = await db
     .select()
     .from(emailTemplates)
@@ -102,7 +95,6 @@ export async function POST(req: NextRequest) {
   let transportConfig: SMTPTransport.Options;
 
   if (isSesSmtpConfigured) {
-    // AWS SES via SMTP credentials (downloaded CSV)
     const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
     transportConfig = {
       host: sesSmtpHost,
@@ -111,8 +103,6 @@ export async function POST(req: NextRequest) {
       auth: { user: settings.sesSmtpUsername!, pass: settings.sesSmtpPassword! },
     };
   } else if (isSesIamConfigured) {
-    // AWS SES via IAM access keys — use SES SMTP endpoint with STARTTLS
-    // IAM keys are used directly as SMTP credentials for the SES SMTP interface
     const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
     transportConfig = {
       host: sesSmtpHost,
@@ -121,7 +111,6 @@ export async function POST(req: NextRequest) {
       auth: { user: settings.sesAccessKeyId!, pass: settings.sesSecretAccessKey! },
     };
   } else {
-    // Standard SMTP
     transportConfig = {
       host: settings.smtpHost!,
       port: settings.smtpPort ?? 587,

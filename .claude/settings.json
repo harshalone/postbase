@@ -50,12 +50,24 @@
       "Bash(ls -laR /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/auth/providers/[providerId]/)",
       "Bash(head -5 /Volumes/2TB/code/postbase.com/apps/web/drizzle/*.sql)",
       "Bash(grep -r MINIO_ /Volumes/2TB/code/postbase.com --include=*.ts --include=*.tsx --include=*.js --include=*.jsx --include=*.sh -n)",
-      "Bash(chmod +x /Volumes/2TB/code/postbase.com/railway.sh)"
+      "Bash(chmod +x /Volumes/2TB/code/postbase.com/railway.sh)",
+      "Bash(ls -la /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/auth/email/)",
+      "Bash(npx drizzle-kit:*)",
+      "Read(//Users/harshallonare/**)",
+      "Bash(ls -la \"/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\(protected\\)/\")",
+      "Bash(ls -la \"/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\(protected\\)/[projectId]/\")",
+      "Bash(ls -la \"/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\(protected\\)/[projectId]/api-keys/\")",
+      "Bash(ls \"/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\(protected\\)/[projectId]/settings/\")",
+      "Bash(cat /Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/[projectId]/route.ts)",
+      "Bash(grep -v \"^$\")"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
       "/Volumes/2TB/code/postbase.com/packages",
-      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/auth/providers"
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/auth/providers",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/[projectId]",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/auth/v1/[projectId]"
     ]
   }
 }

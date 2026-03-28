@@ -1,5 +1,5 @@
 /**
- * POST /api/auth/v1/token
+ * POST /api/auth/v1/[projectId]/token
  *
  * Exchange credentials or refresh token for a session.
  *
@@ -31,12 +31,14 @@ const refreshSchema = z.object({
 
 const bodySchema = z.discriminatedUnion("grant_type", [passwordSchema, refreshSchema]);
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return Response.json({ error: "Missing API key" }, { status: 401 });
   }
-  const keyInfo = await validateApiKey(authHeader.slice(7));
+  const keyInfo = await validateApiKey(authHeader.slice(7), projectId);
   if (!keyInfo) return Response.json({ error: "Invalid API key" }, { status: 401 });
 
   let body: unknown;
@@ -85,7 +87,6 @@ export async function POST(req: NextRequest) {
       secret
     );
 
-    // Upsert session
     await db.insert(sessions).values({
       userId: user.id,
       projectId: keyInfo.projectId,
@@ -117,7 +118,6 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Invalid or expired refresh token" }, { status: 401 });
   }
 
-  // Verify session still exists in DB
   const [session] = await db
     .select()
     .from(sessions)
@@ -150,7 +150,6 @@ export async function POST(req: NextRequest) {
     secret
   );
 
-  // Rotate refresh token
   await db
     .update(sessions)
     .set({ sessionToken: newRefreshToken, expires: new Date(refreshExpiresAt * 1000) })

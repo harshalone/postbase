@@ -1,7 +1,7 @@
 /**
- * GET   /api/auth/v1/admin/users/[id]   — get user by id
- * PATCH /api/auth/v1/admin/users/[id]   — update user
- * DELETE /api/auth/v1/admin/users/[id]  — delete user
+ * GET   /api/auth/v1/[projectId]/admin/users/[id]   — get user by id
+ * PATCH /api/auth/v1/[projectId]/admin/users/[id]   — update user
+ * DELETE /api/auth/v1/[projectId]/admin/users/[id]  — delete user
  *
  * All require service role key.
  */
@@ -13,10 +13,10 @@ import { users, sessions } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 
-async function requireServiceRole(req: NextRequest) {
+async function requireServiceRole(req: NextRequest, projectId: string) {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return null;
-  const keyInfo = await validateApiKey(authHeader.slice(7));
+  const keyInfo = await validateApiKey(authHeader.slice(7), projectId);
   if (!keyInfo || keyInfo.type !== "service_role") return null;
   return keyInfo;
 }
@@ -36,11 +36,14 @@ function formatUser(user: typeof users.$inferSelect) {
   };
 }
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const keyInfo = await requireServiceRole(req);
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string; id: string }> }
+) {
+  const { projectId, id } = await params;
+  const keyInfo = await requireServiceRole(req, projectId);
   if (!keyInfo) return Response.json({ error: "Service role key required" }, { status: 403 });
 
-  const { id } = await params;
   const [user] = await db
     .select()
     .from(users)
@@ -58,11 +61,13 @@ const updateSchema = z.object({
   ban: z.boolean().optional(),
 });
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const keyInfo = await requireServiceRole(req);
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string; id: string }> }
+) {
+  const { projectId, id } = await params;
+  const keyInfo = await requireServiceRole(req, projectId);
   if (!keyInfo) return Response.json({ error: "Service role key required" }, { status: 403 });
-
-  const { id } = await params;
 
   let body: unknown;
   try { body = await req.json(); } catch {
@@ -89,13 +94,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   return Response.json({ user: formatUser(user) });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const keyInfo = await requireServiceRole(req);
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string; id: string }> }
+) {
+  const { projectId, id } = await params;
+  const keyInfo = await requireServiceRole(req, projectId);
   if (!keyInfo) return Response.json({ error: "Service role key required" }, { status: 403 });
 
-  const { id } = await params;
-
-  // Delete sessions first (cascade handles the rest)
   await db.delete(sessions).where(eq(sessions.userId, id));
 
   const [deleted] = await db

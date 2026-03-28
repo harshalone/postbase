@@ -21,6 +21,7 @@ echo "==> Applying schema patches..."
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 ALTER TABLE "_postbase"."email_settings" ADD COLUMN IF NOT EXISTS "ses_smtp_username" text;
 ALTER TABLE "_postbase"."email_settings" ADD COLUMN IF NOT EXISTS "ses_smtp_password" text;
+ALTER TABLE "_postbase"."projects" ADD COLUMN IF NOT EXISTS "user_column_defs" jsonb DEFAULT '[]'::jsonb;
 SQL
 echo "==> Migrations done."
 

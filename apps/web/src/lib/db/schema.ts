@@ -35,6 +35,8 @@ export const projects = postbaseSchema.table("projects", {
   anonKey: text("anon_key").notNull().unique(),
   serviceRoleKey: text("service_role_key").notNull().unique(),
   databaseUrl: text("database_url"), // optional: per-project DB
+  // Admin-defined extra columns shown in the Users dashboard (stored in user metadata)
+  userColumnDefs: jsonb("user_column_defs").default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

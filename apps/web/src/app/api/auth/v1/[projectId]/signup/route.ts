@@ -1,5 +1,5 @@
 /**
- * POST /api/auth/v1/signup
+ * POST /api/auth/v1/[projectId]/signup
  *
  * Sign up a new user with email + password.
  * Requires: Authorization: Bearer <anon-key>
@@ -23,12 +23,14 @@ const bodySchema = z.object({
   data: z.record(z.unknown()).optional(),
 });
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return Response.json({ error: "Missing API key" }, { status: 401 });
   }
-  const keyInfo = await validateApiKey(authHeader.slice(7));
+  const keyInfo = await validateApiKey(authHeader.slice(7), projectId);
   if (!keyInfo) return Response.json({ error: "Invalid API key" }, { status: 401 });
 
   let body: unknown;
@@ -42,7 +44,6 @@ export async function POST(req: NextRequest) {
   }
   const { email, password, data: metadata } = parsed.data;
 
-  // Check if user already exists in this project
   const [existing] = await db
     .select({ id: users.id })
     .from(users)
@@ -54,7 +55,6 @@ export async function POST(req: NextRequest) {
   }
 
   const passwordHash = await hash(password, 12);
-  const now = new Date();
 
   const [user] = await db
     .insert(users)
@@ -80,13 +80,11 @@ export async function POST(req: NextRequest) {
     secret
   );
 
-  // Store session
-  const sessionExpires = new Date(refreshExpiresAt * 1000);
   await db.insert(sessions).values({
     userId: user.id,
     projectId: keyInfo.projectId,
     sessionToken: refreshToken,
-    expires: sessionExpires,
+    expires: new Date(refreshExpiresAt * 1000),
   });
 
   const userOut = {

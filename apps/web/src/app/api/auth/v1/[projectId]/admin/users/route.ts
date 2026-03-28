@@ -1,6 +1,6 @@
 /**
- * GET  /api/auth/v1/admin/users   — list users (service role only)
- * POST /api/auth/v1/admin/users   — create user (service role only)
+ * GET  /api/auth/v1/[projectId]/admin/users   — list users (service role only)
+ * POST /api/auth/v1/[projectId]/admin/users   — create user (service role only)
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
@@ -10,10 +10,10 @@ import { users } from "@/lib/db/schema";
 import { eq, and, count } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 
-async function requireServiceRole(req: NextRequest) {
+async function requireServiceRole(req: NextRequest, projectId: string) {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return null;
-  const keyInfo = await validateApiKey(authHeader.slice(7));
+  const keyInfo = await validateApiKey(authHeader.slice(7), projectId);
   if (!keyInfo || keyInfo.type !== "service_role") return null;
   return keyInfo;
 }
@@ -33,8 +33,9 @@ function formatUser(user: typeof users.$inferSelect) {
   };
 }
 
-export async function GET(req: NextRequest) {
-  const keyInfo = await requireServiceRole(req);
+export async function GET(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  const keyInfo = await requireServiceRole(req, projectId);
   if (!keyInfo) return Response.json({ error: "Service role key required" }, { status: 403 });
 
   const { searchParams } = req.nextUrl;
@@ -65,8 +66,9 @@ const createSchema = z.object({
   user_metadata: z.record(z.unknown()).optional(),
 });
 
-export async function POST(req: NextRequest) {
-  const keyInfo = await requireServiceRole(req);
+export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  const keyInfo = await requireServiceRole(req, projectId);
   if (!keyInfo) return Response.json({ error: "Service role key required" }, { status: 403 });
 
   let body: unknown;
