@@ -15,6 +15,13 @@ for f in $(ls /app/drizzle/*.sql | sort); do
     echo "  -> $(basename $f)"
     psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
 done
+
+# ── Incremental schema patches (idempotent) ───────────────────────────────────
+echo "==> Applying schema patches..."
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+ALTER TABLE "_postbase"."email_settings" ADD COLUMN IF NOT EXISTS "ses_smtp_username" text;
+ALTER TABLE "_postbase"."email_settings" ADD COLUMN IF NOT EXISTS "ses_smtp_password" text;
+SQL
 echo "==> Migrations done."
 
 # ── Seed (idempotent) ─────────────────────────────────────────────────────────
