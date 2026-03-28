@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useSlidePanel } from "@/hooks/use-slide-panel";
+import { Plus } from "lucide-react";
 import { AddColumnModal } from "./add-column-modal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -150,7 +152,8 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
   const [users, setUsers] = useState<DashboardUser[]>(initialUsers);
   const [total] = useState(initialTotal);
   const [columns, setColumns] = useState<UserColumnDef[]>(initialColumns);
-  const [showAddColumn, setShowAddColumn] = useState(false);
+  const addColumnPanel = useSlidePanel();
+  const showAddColumn = addColumnPanel.visible;
   const [search, setSearch] = useState("");
 
   function handleMetadataSaved(userId: string, key: string, value: unknown) {
@@ -182,7 +185,7 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
     });
     if (res.ok) {
       setColumns(next);
-      setShowAddColumn(false);
+      addColumnPanel.close();
     }
   }
 
@@ -207,6 +210,13 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
         <div className="text-xs text-zinc-600 flex items-center px-2">
           {total} user{total !== 1 ? "s" : ""}
         </div>
+        <button
+          onClick={() => addColumnPanel.open()}
+          className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium transition-colors whitespace-nowrap"
+        >
+          <Plus size={11} />
+          Add column
+        </button>
       </div>
 
       {/* Table */}
@@ -247,18 +257,6 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
                 </th>
               ))}
 
-              {/* Add column button as last header */}
-              <th className="px-4 py-3">
-                <button
-                  onClick={() => setShowAddColumn(true)}
-                  className="flex items-center gap-1 text-xs text-zinc-500 hover:text-white border border-dashed border-zinc-700 hover:border-zinc-500 rounded px-2 py-0.5 transition-colors whitespace-nowrap"
-                >
-                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 2a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2H9v4a1 1 0 1 1-2 0V9H3a1 1 0 1 1 0-2h4V3a1 1 0 0 1 1-1z"/>
-                  </svg>
-                  Add column
-                </button>
-              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
@@ -334,8 +332,6 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
                     </td>
                   ))}
 
-                  {/* Empty cell under "Add column" header */}
-                  <td className="px-4 py-3" />
                 </tr>
               ))
             )}
@@ -347,7 +343,8 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
         <AddColumnModal
           existingKeys={columns.map((c) => c.key)}
           onAdd={handleAddColumn}
-          onClose={() => setShowAddColumn(false)}
+          onClose={() => addColumnPanel.close()}
+          closing={addColumnPanel.closing}
         />
       )}
     </>

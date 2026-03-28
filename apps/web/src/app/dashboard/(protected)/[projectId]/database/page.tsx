@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, use } from "react";
+import { useSlidePanel } from "@/hooks/use-slide-panel";
 import {
   Table2,
   Shield,
@@ -139,7 +140,8 @@ export default function DatabasePage({
   const TABLE_LIMIT = 50;
 
   // New table dialog
-  const [showNewTable, setShowNewTable] = useState(false);
+  const newTablePanel = useSlidePanel();
+  const showNewTable = newTablePanel.visible;
   const [newTableName, setNewTableName] = useState("");
   const [newTableDescription, setNewTableDescription] = useState("");
   const [enableRls, setEnableRls] = useState(true);
@@ -151,11 +153,13 @@ export default function DatabasePage({
   const [dragColIndex, setDragColIndex] = useState<number | null>(null);
   const [tableView, setTableView] = useState<"data" | "definition">("data");
   const [showInsertMenu, setShowInsertMenu] = useState(false);
-  const [showInsertRow, setShowInsertRow] = useState(false);
+  const insertRowPanel = useSlidePanel();
+  const showInsertRow = insertRowPanel.visible;
   const [insertRowValues, setInsertRowValues] = useState<Record<string, string>>({});
   const [insertRowLoading, setInsertRowLoading] = useState(false);
   const [createMoreRow, setCreateMoreRow] = useState(false);
-  const [showInsertCol, setShowInsertCol] = useState(false);
+  const insertColPanel = useSlidePanel();
+  const showInsertCol = insertColPanel.visible;
   const [insertColForm, setInsertColForm] = useState({ name: "", description: "", type: "", isArray: false, defaultValue: "", isPrimaryKey: false });
   const [insertColLoading, setInsertColLoading] = useState(false);
   const [createMoreCol, setCreateMoreCol] = useState(false);
@@ -168,7 +172,8 @@ export default function DatabasePage({
   const [rlsLoading, setRlsLoading] = useState(false);
   const [selectedRlsTable, setSelectedRlsTable] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState("");
-  const [showNewPolicy, setShowNewPolicy] = useState(false);
+  const newPolicyPanel = useSlidePanel();
+  const showNewPolicy = newPolicyPanel.visible;
   const [policyForm, setPolicyForm] = useState({
     table: "",
     policyName: "",
@@ -178,7 +183,8 @@ export default function DatabasePage({
     using: "",
     withCheck: "",
   });
-  const [showEditPolicy, setShowEditPolicy] = useState(false);
+  const editPolicyPanel = useSlidePanel();
+  const showEditPolicy = editPolicyPanel.visible;
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [editPolicyForm, setEditPolicyForm] = useState({
     policyName: "",
@@ -263,7 +269,7 @@ export default function DatabasePage({
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
-      if (!createMoreRow) setShowInsertRow(false);
+      if (!createMoreRow) insertRowPanel.close();
       setInsertRowValues({});
       fetchTableRows(selectedTable, tableOffset);
     } finally {
@@ -284,7 +290,7 @@ export default function DatabasePage({
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
-      if (!createMoreCol) setShowInsertCol(false);
+      if (!createMoreCol) insertColPanel.close();
       setInsertColForm({ name: "", description: "", type: "", isArray: false, defaultValue: "", isPrimaryKey: false });
       fetchTables();
     } finally {
@@ -310,7 +316,7 @@ export default function DatabasePage({
         alert(data.error);
         return;
       }
-      setShowNewTable(false);
+      newTablePanel.close();
       setNewTableName("");
       setNewTableDescription("");
       setEnableRls(true);
@@ -370,7 +376,7 @@ export default function DatabasePage({
     });
     const data = await res.json();
     if (data.error) { setErrorModal(data.error); return; }
-    setShowNewPolicy(false);
+    newPolicyPanel.close();
     fetchRls();
   }
 
@@ -387,7 +393,7 @@ export default function DatabasePage({
       using: p.qual ?? "",
       withCheck: p.with_check ?? "",
     });
-    setShowEditPolicy(true);
+    editPolicyPanel.open();
   }
 
   async function updatePolicy() {
@@ -413,7 +419,7 @@ export default function DatabasePage({
     });
     const data = await res.json();
     if (data.error) { setErrorModal(data.error); return; }
-    setShowEditPolicy(false);
+    editPolicyPanel.close();
     setEditingPolicy(null);
     fetchRls();
   }
@@ -473,7 +479,7 @@ export default function DatabasePage({
                     <RefreshCw size={12} />
                   </button>
                   <button
-                    onClick={() => setShowNewTable(true)}
+                    onClick={() => newTablePanel.open()}
                     title="New table"
                     className="cursor-pointer p-1 rounded bg-brand-500 hover:bg-brand-600 text-white transition-colors"
                   >
@@ -489,7 +495,7 @@ export default function DatabasePage({
                     No tables yet.
                     <br />
                     <button
-                      onClick={() => setShowNewTable(true)}
+                      onClick={() => newTablePanel.open()}
                       className="cursor-pointer mt-2 text-brand-400 hover:text-brand-300"
                     >
                       Create one
@@ -569,13 +575,13 @@ export default function DatabasePage({
                                 icon: Rows2,
                                 label: "Insert row",
                                 sub: `Insert a new row into ${selectedTable}`,
-                                onClick: () => { setShowInsertMenu(false); setShowInsertRow(true); },
+                                onClick: () => { setShowInsertMenu(false); insertRowPanel.open(); },
                               },
                               {
                                 icon: Columns2,
                                 label: "Insert column",
                                 sub: `Insert a new column into ${selectedTable}`,
-                                onClick: () => { setShowInsertMenu(false); setShowInsertCol(true); },
+                                onClick: () => { setShowInsertMenu(false); insertColPanel.open(); },
                               },
                               {
                                 icon: FileText,
@@ -813,7 +819,7 @@ export default function DatabasePage({
                         </button>
                         {t.rls_enabled && (
                           <button
-                            onClick={() => { setPolicyForm((f) => ({ ...f, table: t.tablename })); setShowNewPolicy(true); }}
+                            onClick={() => { setPolicyForm((f) => ({ ...f, table: t.tablename })); newPolicyPanel.open(); }}
                             className="cursor-pointer px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium transition-colors"
                           >
                             Create policy
@@ -841,7 +847,7 @@ export default function DatabasePage({
                           <Shield size={28} className="mx-auto text-zinc-700 mb-3" />
                           <p className="text-sm text-zinc-400 font-medium mb-1">No policies yet</p>
                           <p className="text-xs text-zinc-600 mb-4">Queries will return an empty result set until a policy is added.</p>
-                          <button onClick={() => { setPolicyForm((f) => ({ ...f, table: t.tablename })); setShowNewPolicy(true); }}
+                          <button onClick={() => { setPolicyForm((f) => ({ ...f, table: t.tablename })); newPolicyPanel.open(); }}
                             className="cursor-pointer px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors">
                             Add a policy
                           </button>
@@ -895,10 +901,10 @@ export default function DatabasePage({
       {showNewTable && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-black/40"
-            onClick={() => setShowNewTable(false)}
+            className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${newTablePanel.closing ? "closing" : ""}`}
+            onClick={() => newTablePanel.close()}
           />
-          <div className="fixed inset-y-0 right-0 z-50 w-170 bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl">
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-170 bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${newTablePanel.closing ? "closing" : ""}`}>
 
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800">
@@ -907,7 +913,7 @@ export default function DatabasePage({
                 <code className="bg-zinc-800 text-zinc-300 px-1.5 py-0.5 rounded text-xs font-mono">public</code>
               </p>
               <button
-                onClick={() => setShowNewTable(false)}
+                onClick={() => newTablePanel.close()}
                 className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
               >
                 <X size={16} />
@@ -1092,7 +1098,7 @@ export default function DatabasePage({
             {/* Footer */}
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800">
               <button
-                onClick={() => setShowNewTable(false)}
+                onClick={() => newTablePanel.close()}
                 className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
               >
                 Cancel
@@ -1112,13 +1118,13 @@ export default function DatabasePage({
       {/* ── New Policy Slideover ── */}
       {showNewPolicy && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/60" onClick={() => setShowNewPolicy(false)} />
-          <div className="fixed inset-y-0 right-0 z-50 flex shadow-2xl" style={{ width: "860px" }}>
+          <div className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/60 ${newPolicyPanel.closing ? "closing" : ""}`} onClick={() => newPolicyPanel.close()} />
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 flex shadow-2xl ${newPolicyPanel.closing ? "closing" : ""}`} style={{ width: "860px" }}>
             {/* Left: form */}
             <div className="flex-1 bg-zinc-950 border-l border-zinc-800 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
                 <h2 className="text-base font-semibold text-white">Create a new Row Level Security policy</h2>
-                <button onClick={() => setShowNewPolicy(false)} className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
+                <button onClick={() => newPolicyPanel.close()} className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
                   <X size={15} />
                 </button>
               </div>
@@ -1226,7 +1232,7 @@ with check (
               </div>
 
               <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
-                <button onClick={() => setShowNewPolicy(false)}
+                <button onClick={() => newPolicyPanel.close()}
                   className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors border border-zinc-700">
                   Cancel
                 </button>
@@ -1274,15 +1280,15 @@ with check (
       {/* ── Edit Policy Slideover ── */}
       {showEditPolicy && editingPolicy && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/60" onClick={() => setShowEditPolicy(false)} />
-          <div className="fixed inset-y-0 right-0 z-50 flex shadow-2xl" style={{ width: "600px" }}>
+          <div className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/60 ${editPolicyPanel.closing ? "closing" : ""}`} onClick={() => editPolicyPanel.close()} />
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 flex shadow-2xl ${editPolicyPanel.closing ? "closing" : ""}`} style={{ width: "600px" }}>
             <div className="flex-1 bg-zinc-950 border-l border-zinc-800 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
                 <div>
                   <h2 className="text-base font-semibold text-white">Edit policy</h2>
                   <p className="text-xs text-zinc-500 mt-0.5">on <span className="font-mono text-zinc-400">{editingPolicy.tablename}</span></p>
                 </div>
-                <button onClick={() => setShowEditPolicy(false)} className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
+                <button onClick={() => editPolicyPanel.close()} className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
                   <X size={15} />
                 </button>
               </div>
@@ -1379,7 +1385,7 @@ with check (
               </div>
 
               <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
-                <button onClick={() => setShowEditPolicy(false)}
+                <button onClick={() => editPolicyPanel.close()}
                   className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors border border-zinc-700">
                   Cancel
                 </button>
@@ -1432,8 +1438,8 @@ with check (
       {/* ── Insert Row Slideover ── */}
       {showInsertRow && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setShowInsertRow(false)} />
-          <div className="fixed inset-y-0 right-0 z-50 w-[520px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl">
+          <div className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${insertRowPanel.closing ? "closing" : ""}`} onClick={() => insertRowPanel.close()} />
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[520px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${insertRowPanel.closing ? "closing" : ""}`}>
             <div className="px-6 py-4 border-b border-zinc-800 shrink-0">
               <h2 className="text-base font-semibold text-white">
                 Add new row to{" "}
@@ -1531,7 +1537,7 @@ with check (
                 <span className="text-sm text-zinc-400">Create more</span>
               </label>
               <div className="flex gap-3">
-                <button onClick={() => setShowInsertRow(false)}
+                <button onClick={() => insertRowPanel.close()}
                   className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors">
                   Cancel
                 </button>
@@ -1548,8 +1554,8 @@ with check (
       {/* ── Insert Column Slideover ── */}
       {showInsertCol && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setShowInsertCol(false)} />
-          <div className="fixed inset-y-0 right-0 z-50 w-[520px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl">
+          <div className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${insertColPanel.closing ? "closing" : ""}`} onClick={() => insertColPanel.close()} />
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[520px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${insertColPanel.closing ? "closing" : ""}`}>
             <div className="px-6 py-4 border-b border-zinc-800 shrink-0">
               <h2 className="text-base font-semibold text-white">
                 Add new column to{" "}
@@ -1668,7 +1674,7 @@ with check (
                 <span className="text-sm text-zinc-400">Create more</span>
               </label>
               <div className="flex gap-3">
-                <button onClick={() => setShowInsertCol(false)}
+                <button onClick={() => insertColPanel.close()}
                   className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors">
                   Cancel
                 </button>

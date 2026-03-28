@@ -19,6 +19,50 @@
   --foreground: #ededed;
 }
 
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.slide-panel {
+  animation: slide-in-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.slide-panel.closing {
+  animation: slide-out-right 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.slide-panel-backdrop {
+  animation: fade-in 0.2s ease-out;
+}
+
+.slide-panel-backdrop.closing {
+  animation: fade-out 0.2s ease-out forwards;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

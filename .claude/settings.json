@@ -59,7 +59,10 @@
       "Bash(ls -la \"/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\(protected\\)/[projectId]/api-keys/\")",
       "Bash(ls \"/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\(protected\\)/[projectId]/settings/\")",
       "Bash(cat /Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/[projectId]/route.ts)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -r DATABASE_URL .env*)",
+      "Bash(psql \"postgresql://postbase:postbase@localhost:5432/postbase\" -c \"\\\\d _postbase.projects\")",
+      "Bash(wc -l /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
