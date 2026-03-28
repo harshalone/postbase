@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, ExternalLink, Mail, Server, Cloud, Zap } from "lucide-react";
+import { ArrowLeft, Mail, Server, Zap, Copy, Check } from "lucide-react";
 import Link from "next/link";
 import { OAUTH_PROVIDERS } from "@/lib/auth/providers";
 
@@ -189,6 +189,50 @@ function Field({
       <label className="block text-sm font-medium text-zinc-300">{label}</label>
       {children}
       {hint && <p className="text-xs text-zinc-500">{hint}</p>}
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      className="shrink-0 p-1 rounded text-zinc-500 hover:text-zinc-300 transition-colors"
+      title="Copy to clipboard"
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </button>
+  );
+}
+
+function CallbackUrlBox({ providerId }: { providerId: string }) {
+  const templateUrl = `{YOUR_APP_URL}/api/auth/callback/${providerId}`;
+  const domainUrl = typeof window !== "undefined"
+    ? `${window.location.origin}/api/auth/callback/${providerId}`
+    : null;
+
+  return (
+    <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-4 py-3 space-y-2">
+      <p className="text-xs text-zinc-500 font-medium">Callback URL</p>
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-mono text-zinc-400 break-all flex-1">{templateUrl}</p>
+        <CopyButton text={templateUrl} />
+      </div>
+      {domainUrl && (
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-mono text-zinc-300 break-all flex-1">{domainUrl}</p>
+          <CopyButton text={domainUrl} />
+        </div>
+      )}
+      <p className="text-xs text-zinc-600">
+        Add this URL as an authorized redirect URI in your OAuth app settings.
+      </p>
     </div>
   );
 }
@@ -551,15 +595,7 @@ export function ProviderConfigPage({ provider, projectId, existing }: Props) {
 
         {/* Callback URL hint for OAuth providers */}
         {needsOAuthCreds && (
-          <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-4 py-3">
-            <p className="text-xs text-zinc-500 font-medium mb-1">Callback URL</p>
-            <p className="text-xs font-mono text-zinc-400 break-all">
-              {`{YOUR_APP_URL}/api/auth/callback/${provider.id}`}
-            </p>
-            <p className="text-xs text-zinc-600 mt-1">
-              Add this URL as an authorized redirect URI in your OAuth app settings.
-            </p>
-          </div>
+          <CallbackUrlBox providerId={provider.id} />
         )}
 
         {/* Save */}

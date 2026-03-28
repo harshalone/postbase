@@ -11,9 +11,9 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint",
-    "infra:up": "docker compose up -d postgres minio",
-    "infra:down": "docker compose stop postgres minio",
-    "infra:logs": "docker compose logs -f postgres minio",
+    "infra:up": "docker compose up -d postgres",
+    "infra:down": "docker compose stop postgres",
+    "infra:logs": "docker compose logs -f postgres",
     "db:push": "pnpm --filter web db:push",
     "db:seed": "pnpm --filter web db:seed",
     "db:studio": "pnpm --filter web db:studio"

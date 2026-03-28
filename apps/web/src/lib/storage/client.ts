@@ -261,10 +261,18 @@ export async function getStorageClient(projectId: string): Promise<StorageAdapte
     );
   }
 
-  // Fall back to environment-level MinIO
-  const endpoint = process.env.MINIO_ENDPOINT ?? "http://localhost:9000";
-  const accessKeyId = process.env.MINIO_ACCESS_KEY ?? "minioadmin";
-  const secretAccessKey = process.env.MINIO_SECRET_KEY ?? "minioadmin";
+  // Fall back to environment-level S3-compatible storage (e.g. Cloudflare R2)
+  const endpoint = process.env.STORAGE_ENDPOINT;
+  const accessKeyId = process.env.STORAGE_ACCESS_KEY;
+  const secretAccessKey = process.env.STORAGE_SECRET_KEY;
+  const region = process.env.STORAGE_REGION ?? "auto";
 
-  return new S3Client(endpoint, accessKeyId, secretAccessKey, "us-east-1");
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
+    throw new Error(
+      "No storage connection configured for this project. " +
+      "Add a storage connection in the dashboard or set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, and STORAGE_SECRET_KEY."
+    );
+  }
+
+  return new S3Client(endpoint, accessKeyId, secretAccessKey, region);
 }
