@@ -4,6 +4,11 @@ set -e
 PORT="${PORT:-3000}"
 export PORT
 
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "ERROR: DATABASE_URL is not set. Link the Postgres service in Railway." >&2
+  exit 1
+fi
+
 # ── Run migrations against external DATABASE_URL ─────────────────────────────
 echo "==> Running database migrations..."
 for f in $(ls /app/drizzle/*.sql | sort); do
@@ -20,4 +25,6 @@ if [ -f /docker-entrypoint-initdb.d/seed.sql ]; then
 fi
 
 # ── Start Next.js ─────────────────────────────────────────────────────────────
-exec node /app/apps/web/server.js
+# HOSTNAME=0.0.0.0 is required — standalone server binds to localhost by default
+# which Railway's proxy cannot reach
+exec env HOSTNAME=0.0.0.0 node /app/apps/web/server.js
