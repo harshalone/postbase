@@ -253,11 +253,13 @@ export async function getStorageClient(projectId: string): Promise<StorageAdapte
     .limit(1);
 
   if (conn) {
+    // R2 always signs with "auto" region regardless of what's stored
+    const region = conn.provider === "r2" ? "auto" : (conn.region ?? "us-east-1");
     return new S3Client(
-      conn.endpoint ?? `https://s3.${conn.region ?? "us-east-1"}.amazonaws.com`,
+      conn.endpoint ?? `https://s3.${region}.amazonaws.com`,
       conn.accessKeyId,
       conn.secretAccessKey,
-      conn.region ?? "us-east-1"
+      region
     );
   }
 

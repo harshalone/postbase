@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, use } from "react";
+import { useRouter } from "next/navigation";
+import { useSlidePanel } from "@/hooks/use-slide-panel";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus,
@@ -13,6 +15,10 @@ import {
   HardDrive,
   Eye,
   EyeOff,
+  Info,
+  Copy,
+  Check,
+  FolderOpen,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -56,7 +62,14 @@ const BLANK_FORM: FormState = {
 
 // ─── Provider metadata ────────────────────────────────────────────────────────
 
-const PROVIDERS: { id: Provider; label: string; logo: string; needsEndpoint: boolean; regionPlaceholder?: string; endpointPlaceholder?: string }[] = [
+const PROVIDERS: {
+  id: Provider;
+  label: string;
+  logo: string;
+  needsEndpoint: boolean;
+  regionPlaceholder?: string;
+  endpointPlaceholder?: string;
+}[] = [
   {
     id: "s3",
     label: "Amazon S3",
@@ -69,7 +82,7 @@ const PROVIDERS: { id: Provider; label: string; logo: string; needsEndpoint: boo
     label: "Cloudflare R2",
     logo: "https://upload.wikimedia.org/wikipedia/commons/4/4b/Cloudflare_Logo.svg",
     needsEndpoint: true,
-    endpointPlaceholder: "https://<account-id>.r2.cloudflarestorage.com",
+    endpointPlaceholder: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com",
   },
   {
     id: "backblaze",
@@ -101,7 +114,13 @@ function providerMeta(id: Provider) {
 
 // ─── Provider icon ─────────────────────────────────────────────────────────────
 
-function ProviderBadge({ provider, size = "sm" }: { provider: Provider; size?: "sm" | "lg" }) {
+function ProviderBadge({
+  provider,
+  size = "sm",
+}: {
+  provider: Provider;
+  size?: "sm" | "lg";
+}) {
   const meta = providerMeta(provider);
   const cls = size === "lg" ? "w-8 h-8" : "w-5 h-5";
   const labelMap: Record<Provider, string> = {
@@ -114,7 +133,9 @@ function ProviderBadge({ provider, size = "sm" }: { provider: Provider; size?: "
 
   if (!meta.logo) {
     return (
-      <span className={`${cls} flex items-center justify-center rounded bg-zinc-700 text-zinc-300 text-[9px] font-bold`}>
+      <span
+        className={`${cls} flex items-center justify-center rounded bg-zinc-700 text-zinc-300 text-[9px] font-bold`}
+      >
         {labelMap[provider]}
       </span>
     );
@@ -133,16 +154,185 @@ function ProviderBadge({ provider, size = "sm" }: { provider: Provider; size?: "
   );
 }
 
+// ─── Inline copy button ───────────────────────────────────────────────────────
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="cursor-pointer ml-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+      title="Copy"
+    >
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+    </button>
+  );
+}
+
+// ─── Cloudflare R2 setup guide ─────────────────────────────────────────────────
+
+function R2SetupGuide({ bucket }: { bucket: string }) {
+  const corsJson = JSON.stringify(
+    [
+      {
+        AllowedOrigins: ["https://your-domain.com", "http://localhost:3000"],
+        AllowedMethods: ["GET", "PUT", "DELETE"],
+      },
+    ],
+    null,
+    2
+  );
+
+  return (
+    <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-4 space-y-3">
+      <div className="flex items-center gap-2 text-orange-400">
+        <Info size={14} />
+        <span className="text-xs font-semibold uppercase tracking-wider">
+          Cloudflare R2 Setup Guide
+        </span>
+      </div>
+
+      <div className="space-y-2.5 text-xs text-zinc-400">
+        <p>
+          Follow these steps in your{" "}
+          <span className="text-zinc-300 font-medium">
+            Cloudflare Dashboard → R2 Object Storage
+          </span>
+          :
+        </p>
+
+        <ol className="space-y-2 list-decimal list-inside marker:text-zinc-600">
+          <li>
+            <span className="text-zinc-300">Find your Account ID</span> — top
+            right of any Cloudflare dashboard page. Paste it into{" "}
+            <em>Account ID</em> below and it will build the S3 API URL for you.
+          </li>
+          <li>
+            <span className="text-zinc-300">Create an API Token</span> — go to{" "}
+            <span className="font-medium text-zinc-300">
+              R2 → Manage API tokens → Create API token
+            </span>
+            . Choose{" "}
+            <span className="font-medium text-zinc-300">
+              Object Read &amp; Write
+            </span>{" "}
+            permissions scoped to your bucket.
+            <div className="mt-1.5 rounded bg-zinc-800/60 px-3 py-2 space-y-1">
+              <p>
+                <span className="text-zinc-500">Access Key ID</span> → paste
+                into <em>Access Key ID</em> below
+              </p>
+              <p>
+                <span className="text-zinc-500">Secret Access Key</span> →
+                paste into <em>Secret Access Key</em> below
+              </p>
+            </div>
+            <p className="mt-1 text-zinc-600">
+              Note: these are S3-compatible token credentials, not your
+              Cloudflare Account API Token or User API Token.
+            </p>
+          </li>
+          {bucket && (
+            <li>
+              <span className="text-zinc-300">Set CORS policy</span> on bucket{" "}
+              <span className="font-mono text-brand-400">{bucket}</span> — go to{" "}
+              <span className="text-zinc-300">
+                R2 → {bucket} → Settings → CORS Policy
+              </span>{" "}
+              and add your allowed origins:
+              <div className="relative mt-1.5">
+                <pre className="rounded bg-zinc-800/60 px-3 py-2 text-[10px] text-zinc-300 overflow-x-auto whitespace-pre-wrap break-all">
+                  {corsJson}
+                </pre>
+                <span className="absolute top-1.5 right-2">
+                  <CopyButton text={corsJson} />
+                </span>
+              </div>
+              <p className="mt-1 text-zinc-600">
+                Replace{" "}
+                <code className="text-zinc-400">https://your-domain.com</code>{" "}
+                with your actual domain(s).
+              </p>
+            </li>
+          )}
+          {!bucket && (
+            <li>
+              <span className="text-zinc-300">Set CORS policy</span> on your
+              bucket — go to{" "}
+              <span className="text-zinc-300">
+                R2 → [your bucket] → Settings → CORS Policy
+              </span>
+              . Add your app&apos;s origin(s) to{" "}
+              <code className="text-zinc-400">AllowedOrigins</code> with methods{" "}
+              <code className="text-zinc-400">GET, PUT, DELETE</code>.
+            </li>
+          )}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+// ─── Account ID helper for R2 ─────────────────────────────────────────────────
+
+function R2AccountIdField({
+  accountId,
+  onChange,
+  onEndpointChange,
+}: {
+  accountId: string;
+  onChange: (v: string) => void;
+  onEndpointChange: (v: string) => void;
+}) {
+  function handleChange(v: string) {
+    onChange(v);
+    if (v.trim()) {
+      onEndpointChange(`https://${v.trim()}.r2.cloudflarestorage.com`);
+    } else {
+      onEndpointChange("");
+    }
+  }
+
+  return (
+    <div>
+      <label className="block text-xs text-zinc-400 mb-1.5">
+        Account ID
+        <span className="text-zinc-600 ml-1">(required)</span>
+      </label>
+      <input
+        value={accountId}
+        onChange={(e) => handleChange(e.target.value)}
+        placeholder="abc123def456..."
+        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+      />
+      <p className="mt-1 text-[11px] text-zinc-600">
+        Found on your Cloudflare dashboard (top-right corner).
+      </p>
+    </div>
+  );
+}
+
 // ─── Connection row ────────────────────────────────────────────────────────────
 
 function ConnectionRow({
   conn,
+  onBrowse,
   onEdit,
   onDelete,
   onTest,
   onSetDefault,
 }: {
   conn: StorageConnection;
+  onBrowse: (c: StorageConnection) => void;
   onEdit: (c: StorageConnection) => void;
   onDelete: (c: StorageConnection) => void;
   onTest: (c: StorageConnection) => void;
@@ -156,14 +346,19 @@ function ConnectionRow({
         <div className="flex items-center gap-3">
           <ProviderBadge provider={conn.provider} />
           <div>
-            <p className="text-sm font-medium text-white flex items-center gap-2">
-              {conn.name}
-              {conn.isDefault && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-400 font-semibold uppercase tracking-wider">
-                  Default
-                </span>
-              )}
-            </p>
+            <button
+              onClick={() => onBrowse(conn)}
+              className="cursor-pointer text-left hover:text-brand-400 transition-colors"
+            >
+              <p className="text-sm font-medium text-white flex items-center gap-2">
+                {conn.name}
+                {conn.isDefault && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-400 font-semibold uppercase tracking-wider">
+                    Default
+                  </span>
+                )}
+              </p>
+            </button>
             <p className="text-xs text-zinc-500 mt-0.5">{meta.label}</p>
           </div>
         </div>
@@ -173,13 +368,13 @@ function ConnectionRow({
       </td>
       <td className="px-6 py-4">
         <span className="text-sm text-zinc-400">
-          {conn.endpoint
-            ? new URL(conn.endpoint).hostname
-            : conn.region || "—"}
+          {conn.endpoint ? new URL(conn.endpoint).hostname : conn.region || "—"}
         </span>
       </td>
       <td className="px-6 py-4">
-        <span className="text-xs font-mono text-zinc-500">{conn.accessKeyId}</span>
+        <span className="text-xs font-mono text-zinc-500">
+          {conn.accessKeyId}
+        </span>
       </td>
       <td className="px-6 py-4 text-right">
         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -192,6 +387,14 @@ function ConnectionRow({
               <Star size={13} />
             </button>
           )}
+          <button
+            onClick={() => onBrowse(conn)}
+            title="Browse files"
+            className="cursor-pointer flex items-center gap-1 px-2.5 py-1.5 rounded text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+          >
+            <FolderOpen size={12} />
+            Browse
+          </button>
           <button
             onClick={() => onTest(conn)}
             title="Test connection"
@@ -221,24 +424,43 @@ function ConnectionRow({
 
 function ConnectionForm({
   initial,
-  onSave,
-  onCancel,
-  saving,
+  onChange,
 }: {
   initial: FormState;
-  onSave: (f: FormState) => void;
-  onCancel: () => void;
-  saving: boolean;
+  onChange: (f: FormState) => void;
 }) {
   const [form, setForm] = useState<FormState>(initial);
   const [showSecret, setShowSecret] = useState(false);
+  // For R2 we track account ID separately to auto-build the endpoint URL
+  const [r2AccountId, setR2AccountId] = useState(() => {
+    if (initial.provider === "r2" && initial.endpoint) {
+      const match = initial.endpoint.match(
+        /^https:\/\/([^.]+)\.r2\.cloudflarestorage\.com/
+      );
+      return match ? match[1] : "";
+    }
+    return "";
+  });
+
   const meta = providerMeta(form.provider);
+
+  useEffect(() => {
+    onChange(form);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
 
   function set(key: keyof FormState, value: string | boolean) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
   const isEdit = !!initial.accessKeyId && initial.accessKeyId !== "";
+
+  function handleProviderChange(id: Provider) {
+    set("provider", id);
+    set("endpoint", "");
+    set("region", "");
+    setR2AccountId("");
+  }
 
   return (
     <div className="space-y-5">
@@ -250,11 +472,7 @@ function ConnectionForm({
             <button
               key={p.id}
               type="button"
-              onClick={() => {
-                set("provider", p.id);
-                set("endpoint", "");
-                set("region", "");
-              }}
+              onClick={() => handleProviderChange(p.id)}
               className={`cursor-pointer flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm transition-colors ${
                 form.provider === p.id
                   ? "border-brand-500 bg-brand-500/10 text-white"
@@ -268,48 +486,99 @@ function ConnectionForm({
         </div>
       </div>
 
+      {/* R2 setup guide */}
+      {form.provider === "r2" && <R2SetupGuide bucket={form.bucket} />}
+
       {/* Name */}
       <div>
-        <label className="block text-xs text-zinc-400 mb-1.5">Connection name</label>
+        <label className="block text-xs text-zinc-400 mb-1.5">
+          Connection name
+        </label>
         <input
           value={form.name}
           onChange={(e) => set("name", e.target.value)}
-          placeholder="My S3 bucket"
+          placeholder={
+            form.provider === "r2" ? "My R2 Bucket" : "My S3 bucket"
+          }
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
         />
       </div>
 
       {/* Bucket + Region */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className={form.provider === "r2" ? "" : "grid grid-cols-2 gap-3"}>
         <div>
-          <label className="block text-xs text-zinc-400 mb-1.5">Bucket name</label>
+          <label className="block text-xs text-zinc-400 mb-1.5">
+            Bucket name
+          </label>
           <input
             value={form.bucket}
             onChange={(e) => set("bucket", e.target.value)}
             placeholder="my-bucket"
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
           />
+          {form.provider === "r2" && (
+            <p className="mt-1 text-[11px] text-zinc-600">
+              The name of your R2 bucket in Cloudflare dashboard.
+            </p>
+          )}
         </div>
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1.5">
-            Region
-            {!meta.needsEndpoint && <span className="text-zinc-600 ml-1">(required)</span>}
-          </label>
-          <input
-            value={form.region}
-            onChange={(e) => set("region", e.target.value)}
-            placeholder={meta.regionPlaceholder ?? "us-east-1"}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
-          />
-        </div>
+        {form.provider !== "r2" && (
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">
+              Region
+              {!meta.needsEndpoint && (
+                <span className="text-zinc-600 ml-1">(required)</span>
+              )}
+            </label>
+            <input
+              value={form.region}
+              onChange={(e) => set("region", e.target.value)}
+              placeholder={meta.regionPlaceholder ?? "us-east-1"}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+        )}
       </div>
 
-      {/* Endpoint (for R2, Backblaze, other) */}
-      {meta.needsEndpoint && (
+      {/* R2-specific: Account ID + derived S3 API URL */}
+      {form.provider === "r2" && (
+        <>
+          <R2AccountIdField
+            accountId={r2AccountId}
+            onChange={setR2AccountId}
+            onEndpointChange={(v) => set("endpoint", v)}
+          />
+
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">
+              S3 API URL
+              <span className="text-zinc-600 ml-1">(auto-generated)</span>
+            </label>
+            <input
+              value={form.endpoint}
+              onChange={(e) => set("endpoint", e.target.value)}
+              placeholder="https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+            />
+            <p className="mt-1 text-[11px] text-zinc-600">
+              Auto-filled from Account ID above. You can also find this under{" "}
+              <span className="text-zinc-500">
+                R2 → [bucket] → Settings → S3 API
+              </span>
+              .
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Endpoint for non-R2 providers that need it */}
+      {meta.needsEndpoint && form.provider !== "r2" && (
         <div>
           <label className="block text-xs text-zinc-400 mb-1.5">
             Endpoint URL
-            <span className="text-zinc-600 ml-1">(required for {meta.label})</span>
+            <span className="text-zinc-600 ml-1">
+              (required for {meta.label})
+            </span>
           </label>
           <input
             value={form.endpoint}
@@ -322,26 +591,52 @@ function ConnectionForm({
 
       {/* Credentials */}
       <div>
-        <label className="block text-xs text-zinc-400 mb-1.5">Access Key ID</label>
+        <label className="block text-xs text-zinc-400 mb-1.5">
+          {form.provider === "r2" ? "Access Key ID" : "Access Key ID"}
+        </label>
         <input
           value={form.accessKeyId}
           onChange={(e) => set("accessKeyId", e.target.value)}
-          placeholder="AKIAIOSFODNN7EXAMPLE"
+          placeholder={
+            form.provider === "r2"
+              ? "From R2 API token → Access Key ID"
+              : "AKIAIOSFODNN7EXAMPLE"
+          }
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
         />
+        {form.provider === "r2" && (
+          <p className="mt-1 text-[11px] text-zinc-600">
+            From{" "}
+            <span className="text-zinc-500">
+              R2 → Manage API tokens → Create API token → Access Key ID
+            </span>
+            . This is the S3-compatible token, not your Cloudflare Account or
+            User API Token.
+          </p>
+        )}
       </div>
 
       <div>
         <label className="block text-xs text-zinc-400 mb-1.5">
-          Secret Access Key
-          {isEdit && <span className="text-zinc-600 ml-1">(leave blank to keep existing)</span>}
+          {form.provider === "r2" ? "Secret Access Key" : "Secret Access Key"}
+          {isEdit && (
+            <span className="text-zinc-600 ml-1">
+              (leave blank to keep existing)
+            </span>
+          )}
         </label>
         <div className="relative">
           <input
             type={showSecret ? "text" : "password"}
             value={form.secretAccessKey}
             onChange={(e) => set("secretAccessKey", e.target.value)}
-            placeholder={isEdit ? "••••••••••••••••" : "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}
+            placeholder={
+              isEdit
+                ? "••••••••••••••••"
+                : form.provider === "r2"
+                  ? "From R2 API token → Secret Access Key"
+                  : "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+            }
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 pr-10 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
           />
           <button
@@ -352,6 +647,15 @@ function ConnectionForm({
             {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         </div>
+        {form.provider === "r2" && (
+          <p className="mt-1 text-[11px] text-zinc-600">
+            From{" "}
+            <span className="text-zinc-500">
+              R2 → Manage API tokens → Create API token → Secret Access Key
+            </span>
+            .
+          </p>
+        )}
       </div>
 
       {/* Default toggle */}
@@ -368,26 +672,10 @@ function ConnectionForm({
             }`}
           />
         </div>
-        <span className="text-sm text-zinc-300">Set as default storage connection</span>
+        <span className="text-sm text-zinc-300">
+          Set as default storage connection
+        </span>
       </label>
-
-      {/* Actions */}
-      <div className="flex justify-end gap-3 pt-2 border-t border-zinc-800">
-        <button
-          onClick={onCancel}
-          className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={() => onSave(form)}
-          disabled={saving || !form.name || !form.bucket || !form.accessKeyId}
-          className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
-        >
-          {saving && <Loader2 size={14} className="animate-spin" />}
-          {saving ? "Saving…" : isEdit ? "Save Changes" : "Add Connection"}
-        </button>
-      </div>
     </div>
   );
 }
@@ -400,15 +688,19 @@ export default function StoragePage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
+  const router = useRouter();
   const toast = useToast();
+  const formPanel = useSlidePanel();
 
   const [connections, setConnections] = useState<StorageConnection[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState<StorageConnection | null>(null);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState<string | null>(null); // connectionId being tested
-  const [deleteConfirm, setDeleteConfirm] = useState<StorageConnection | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<StorageConnection | null>(
+    null
+  );
+  const [formKey, setFormKey] = useState(0);
 
   const fetchConnections = useCallback(async () => {
     setLoading(true);
@@ -425,11 +717,13 @@ export default function StoragePage({
     fetchConnections();
   }, [fetchConnections]);
 
+  // We hold form state at the page level so the footer Save button can trigger it
+  const [pendingForm, setPendingForm] = useState<FormState>(BLANK_FORM);
+
   async function handleSave(form: FormState) {
     setSaving(true);
     try {
       if (editTarget) {
-        // PATCH existing
         const body: Record<string, unknown> = {
           name: form.name,
           bucket: form.bucket,
@@ -449,9 +743,15 @@ export default function StoragePage({
           }
         );
         const data = await res.json();
-        if (data.error) { toast.error(typeof data.error === "string" ? data.error : JSON.stringify(data.error)); return; }
+        if (data.error) {
+          toast.error(
+            typeof data.error === "string"
+              ? data.error
+              : JSON.stringify(data.error)
+          );
+          return;
+        }
       } else {
-        // POST new
         const res = await fetch(`/api/dashboard/${projectId}/storage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -462,10 +762,17 @@ export default function StoragePage({
           }),
         });
         const data = await res.json();
-        if (data.error) { toast.error(typeof data.error === "string" ? data.error : JSON.stringify(data.error)); return; }
+        if (data.error) {
+          toast.error(
+            typeof data.error === "string"
+              ? data.error
+              : JSON.stringify(data.error)
+          );
+          return;
+        }
       }
 
-      setShowForm(false);
+      formPanel.close();
       setEditTarget(null);
       fetchConnections();
     } finally {
@@ -479,7 +786,10 @@ export default function StoragePage({
       { method: "DELETE" }
     );
     const data = await res.json();
-    if (data.error) { toast.error(data.error); return; }
+    if (data.error) {
+      toast.error(data.error);
+      return;
+    }
     setDeleteConfirm(null);
     fetchConnections();
   }
@@ -517,26 +827,32 @@ export default function StoragePage({
 
   function openAdd() {
     setEditTarget(null);
-    setShowForm(true);
+    setPendingForm(BLANK_FORM);
+    setFormKey((k) => k + 1);
+    formPanel.open();
   }
 
   function openEdit(conn: StorageConnection) {
     setEditTarget(conn);
-    setShowForm(true);
+    const initial: FormState = {
+      name: conn.name,
+      provider: conn.provider,
+      bucket: conn.bucket,
+      region: conn.region ?? "",
+      endpoint: conn.endpoint ?? "",
+      accessKeyId: conn.accessKeyId,
+      secretAccessKey: "",
+      isDefault: conn.isDefault,
+    };
+    setPendingForm(initial);
+    setFormKey((k) => k + 1);
+    formPanel.open();
   }
 
-  const formInitial: FormState = editTarget
-    ? {
-        name: editTarget.name,
-        provider: editTarget.provider,
-        bucket: editTarget.bucket,
-        region: editTarget.region ?? "",
-        endpoint: editTarget.endpoint ?? "",
-        accessKeyId: editTarget.accessKeyId,
-        secretAccessKey: "",
-        isDefault: editTarget.isDefault,
-      }
-    : BLANK_FORM;
+  function closePanel() {
+    formPanel.close();
+    setEditTarget(null);
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -572,9 +888,12 @@ export default function StoragePage({
             <div className="w-14 h-14 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
               <HardDrive size={24} className="text-zinc-500" />
             </div>
-            <p className="text-base font-semibold text-zinc-300 mb-1">No storage connections</p>
+            <p className="text-base font-semibold text-zinc-300 mb-1">
+              No storage connections
+            </p>
             <p className="text-sm text-zinc-500 max-w-sm">
-              Connect AWS S3, Cloudflare R2, Backblaze B2, or any S3-compatible provider.
+              Connect AWS S3, Cloudflare R2, Backblaze B2, or any
+              S3-compatible provider.
             </p>
             <button
               onClick={openAdd}
@@ -591,8 +910,12 @@ export default function StoragePage({
                 <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
                   <th className="text-left px-6 py-3 font-medium">Name</th>
                   <th className="text-left px-6 py-3 font-medium">Bucket</th>
-                  <th className="text-left px-6 py-3 font-medium">Endpoint / Region</th>
-                  <th className="text-left px-6 py-3 font-medium">Access Key</th>
+                  <th className="text-left px-6 py-3 font-medium">
+                    Endpoint / Region
+                  </th>
+                  <th className="text-left px-6 py-3 font-medium">
+                    Access Key
+                  </th>
                   <th className="px-6 py-3" />
                 </tr>
               </thead>
@@ -601,6 +924,7 @@ export default function StoragePage({
                   <ConnectionRow
                     key={conn.id}
                     conn={conn}
+                    onBrowse={(c) => router.push(`/dashboard/${projectId}/storage/${c.id}`)}
                     onEdit={openEdit}
                     onDelete={(c) => setDeleteConfirm(c)}
                     onTest={handleTest}
@@ -621,31 +945,73 @@ export default function StoragePage({
         )}
       </div>
 
-      {/* ── Add / Edit dialog ── */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-xl mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
-              <h2 className="text-lg font-semibold text-white">
-                {editTarget ? "Edit Connection" : "Add Storage Connection"}
-              </h2>
+      {/* ── Add / Edit slide panel ── */}
+      {formPanel.visible && (
+        <>
+          <div
+            className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/50 ${formPanel.closing ? "closing" : ""}`}
+            onClick={closePanel}
+          />
+          <div
+            className={`slide-panel fixed inset-y-0 right-0 z-50 w-[560px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${formPanel.closing ? "closing" : ""}`}
+          >
+            {/* Panel header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+              <div>
+                <h2 className="text-base font-semibold text-white">
+                  {editTarget ? "Edit Connection" : "Add Storage Connection"}
+                </h2>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  {editTarget
+                    ? "Update your storage connection settings"
+                    : "Connect a cloud storage bucket to your project"}
+                </p>
+              </div>
               <button
-                onClick={() => { setShowForm(false); setEditTarget(null); }}
+                onClick={closePanel}
                 className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="px-6 py-5">
+
+            {/* Scrollable form body */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
               <ConnectionForm
-                initial={formInitial}
-                onSave={handleSave}
-                onCancel={() => { setShowForm(false); setEditTarget(null); }}
-                saving={saving}
+                key={formKey}
+                initial={pendingForm}
+                onChange={setPendingForm}
               />
             </div>
+
+            {/* Panel footer actions */}
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
+              <button
+                onClick={closePanel}
+                className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSave(pendingForm)}
+                disabled={
+                  saving ||
+                  !pendingForm.name ||
+                  !pendingForm.bucket ||
+                  !pendingForm.accessKeyId
+                }
+                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
+              >
+                {saving && <Loader2 size={14} className="animate-spin" />}
+                {saving
+                  ? "Saving…"
+                  : editTarget
+                    ? "Save Changes"
+                    : "Add Connection"}
+              </button>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* ── Delete confirm dialog ── */}
@@ -653,11 +1019,15 @@ export default function StoragePage({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-sm mx-4 shadow-2xl">
             <div className="px-6 py-5">
-              <h2 className="text-base font-semibold text-white mb-2">Delete connection?</h2>
+              <h2 className="text-base font-semibold text-white mb-2">
+                Delete connection?
+              </h2>
               <p className="text-sm text-zinc-400">
                 This will permanently remove{" "}
-                <span className="text-white font-medium">{deleteConfirm.name}</span>. This
-                action cannot be undone.
+                <span className="text-white font-medium">
+                  {deleteConfirm.name}
+                </span>
+                . This action cannot be undone.
               </p>
             </div>
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800">
