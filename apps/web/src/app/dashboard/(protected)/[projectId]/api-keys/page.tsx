@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { KeyRow } from "./key-row";
 import { CopyButton } from "./copy-button";
 import { PageHeader } from "../_components/page-header";
+import { CodeBlock } from "../_components/code-block";
 
 export default async function ApiKeysPage({
   params,
@@ -80,8 +81,9 @@ export default async function ApiKeysPage({
 
           <div className="mt-6 pt-4 border-t border-zinc-800">
             <p className="text-xs text-zinc-500 mb-2">SDK Initialization</p>
-            <pre className="bg-zinc-800 rounded-lg p-3 text-xs text-zinc-300 overflow-x-auto">
-              {`import { createClient } from '@postbase/client'
+            <CodeBlock
+              language="typescript"
+              code={`import { createClient } from '@postbase/client'
 
 // Anon client (browser-safe, respects RLS)
 const postbase = createClient(
@@ -96,7 +98,7 @@ const postbaseAdmin = createClient(
   '${projectId}',
   '${project.serviceRoleKey}'
 )`}
-            </pre>
+            />
           </div>
         </div>
       </div>
