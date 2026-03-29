@@ -16,6 +16,9 @@ build/
 .env.test.local
 .env.production.local
 
+# Turbo
+.turbo/
+
 # Misc
 .DS_Store
 *.pem

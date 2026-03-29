@@ -3,6 +3,7 @@ import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 import { PageHeader } from "./_components/page-header";
+import { CodeBlock } from "./_components/code-block";
 
 export default async function ProjectOverviewPage({
   params,
@@ -63,19 +64,12 @@ export default async function ProjectOverviewPage({
             <li>
               Install the SDK:{" "}
               <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-200">
-                npm install @postbase/client
+                npm install postbasejs
               </code>
             </li>
             <li>
               Get your API keys from the API Keys tab and initialise the client:
-              <pre className="mt-2 bg-zinc-800 rounded-lg p-3 text-zinc-200 overflow-x-auto">
-                {`import { createClient } from '@postbase/client'
-
-const postbase = createClient(
-  'http://your-postbase.com',
-  'pb_anon_...'
-)`}
-              </pre>
+              <CodeBlock code={`import { createClient } from 'postbasejs';\n\nconst postbase = createClient(\n  '${process.env.NEXT_PUBLIC_APP_URL ?? 'https://your-postbase-instance.com'}',\n  'pb_anon_your_api_key',\n  { projectId: '${projectId}' }\n);`} />
             </li>
           </ol>
         </div>
