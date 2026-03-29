@@ -141,11 +141,13 @@ export const emailSettings = postbaseSchema.table("email_settings", {
   smtpPassword: text("smtp_password"),
   smtpSecure: boolean("smtp_secure").default(true),
   smtpFrom: text("smtp_from"),
+  smtpFromName: text("smtp_from_name"),
   // AWS SES fields
   sesRegion: text("ses_region"),
   sesAccessKeyId: text("ses_access_key_id"),
   sesSecretAccessKey: text("ses_secret_access_key"),
   sesFrom: text("ses_from"),
+  sesFromName: text("ses_from_name"),
   // AWS SES SMTP credentials (alternative to IAM keys)
   sesSmtpUsername: text("ses_smtp_username"),
   sesSmtpPassword: text("ses_smtp_password"),

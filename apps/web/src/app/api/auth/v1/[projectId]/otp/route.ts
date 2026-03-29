@@ -132,8 +132,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     }
 
     const transporter = createTransport(transportConfig);
+    const fromEmail = settings.sesFrom ?? settings.smtpFrom ?? settings.smtpUser ?? undefined;
+    const fromName = settings.sesFromName ?? settings.smtpFromName ?? undefined;
+    const from = fromEmail && fromName ? `"${fromName}" <${fromEmail}>` : fromEmail;
     await transporter.sendMail({
-      from: settings.sesFrom ?? settings.smtpFrom ?? settings.smtpUser ?? undefined,
+      from,
       to: email,
       subject,
       html: htmlBody,

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Server, Cloud, CheckCircle2, Loader2, Upload, KeyRound } from "lucide-react";
+import { Server, Cloud, CheckCircle2, Loader2, Upload, KeyRound, FlaskConical } from "lucide-react";
+import { TestEmailPanel } from "./test-email-panel";
 
 type EmailProvider = "smtp" | "ses";
 type SesInputMode = "iam" | "smtp";
@@ -14,10 +15,12 @@ interface Settings {
   smtpPassword: string;
   smtpSecure: boolean;
   smtpFrom: string;
+  smtpFromName: string;
   sesRegion: string;
   sesAccessKeyId: string;
   sesSecretAccessKey: string;
   sesFrom: string;
+  sesFromName: string;
   sesSmtpUsername: string;
   sesSmtpPassword: string;
 }
@@ -30,10 +33,12 @@ const DEFAULT: Settings = {
   smtpPassword: "",
   smtpSecure: true,
   smtpFrom: "",
+  smtpFromName: "",
   sesRegion: "us-east-1",
   sesAccessKeyId: "",
   sesSecretAccessKey: "",
   sesFrom: "",
+  sesFromName: "",
   sesSmtpUsername: "",
   sesSmtpPassword: "",
 };
@@ -73,7 +78,22 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [testPanelOpen, setTestPanelOpen] = useState(false);
+  const [testPanelClosing, setTestPanelClosing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function openTestPanel() {
+    setTestPanelOpen(true);
+    setTestPanelClosing(false);
+  }
+
+  function closeTestPanel() {
+    setTestPanelClosing(true);
+    setTimeout(() => {
+      setTestPanelOpen(false);
+      setTestPanelClosing(false);
+    }, 250);
+  }
 
   useEffect(() => {
     fetch(`/api/dashboard/email-settings?projectId=${projectId}`)
@@ -88,10 +108,12 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
             smtpPassword: s.smtpPassword ?? "",
             smtpSecure: s.smtpSecure ?? true,
             smtpFrom: s.smtpFrom ?? "",
+            smtpFromName: s.smtpFromName ?? "",
             sesRegion: s.sesRegion ?? "us-east-1",
             sesAccessKeyId: s.sesAccessKeyId ?? "",
             sesSecretAccessKey: s.sesSecretAccessKey ?? "",
             sesFrom: s.sesFrom ?? "",
+            sesFromName: s.sesFromName ?? "",
             sesSmtpUsername: s.sesSmtpUsername ?? "",
             sesSmtpPassword: s.sesSmtpPassword ?? "",
           });
@@ -144,10 +166,12 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
           smtpPassword: settings.smtpPassword || undefined,
           smtpSecure: settings.smtpSecure,
           smtpFrom: settings.smtpFrom || undefined,
+          smtpFromName: settings.smtpFromName || undefined,
           sesRegion: settings.sesRegion || undefined,
           sesAccessKeyId: settings.sesAccessKeyId || undefined,
           sesSecretAccessKey: settings.sesSecretAccessKey || undefined,
           sesFrom: settings.sesFrom || undefined,
+          sesFromName: settings.sesFromName || undefined,
           sesSmtpUsername: settings.sesSmtpUsername || undefined,
           sesSmtpPassword: settings.sesSmtpPassword || undefined,
         }),
@@ -250,15 +274,27 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
                 />
               </div>
             </div>
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1.5">From Address</label>
-              <input
-                type="email"
-                value={settings.smtpFrom}
-                onChange={(e) => set("smtpFrom", e.target.value)}
-                placeholder="noreply@yourapp.com"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1.5">From Address</label>
+                <input
+                  type="email"
+                  value={settings.smtpFrom}
+                  onChange={(e) => set("smtpFrom", e.target.value)}
+                  placeholder="noreply@yourapp.com"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1.5">Sender Name</label>
+                <input
+                  type="text"
+                  value={settings.smtpFromName}
+                  onChange={(e) => set("smtpFromName", e.target.value)}
+                  placeholder="My App"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
+                />
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -436,16 +472,28 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
             )}
 
             {/* From address — shared by both modes */}
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1.5">From Address</label>
-              <input
-                type="email"
-                value={settings.sesFrom}
-                onChange={(e) => set("sesFrom", e.target.value)}
-                placeholder="noreply@yourverifieddomain.com"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
-              />
-              <p className="mt-1.5 text-xs text-zinc-600">Must be a verified identity in AWS SES.</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1.5">From Address</label>
+                <input
+                  type="email"
+                  value={settings.sesFrom}
+                  onChange={(e) => set("sesFrom", e.target.value)}
+                  placeholder="noreply@yourverifieddomain.com"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
+                />
+                <p className="mt-1.5 text-xs text-zinc-600">Must be a verified identity in AWS SES.</p>
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1.5">Sender Name</label>
+                <input
+                  type="text"
+                  value={settings.sesFromName}
+                  onChange={(e) => set("sesFromName", e.target.value)}
+                  placeholder="My App"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
+                />
+              </div>
             </div>
           </div>
 
@@ -478,12 +526,28 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
             "Save Settings"
           )}
         </button>
+        <button
+          type="button"
+          onClick={openTestPanel}
+          className="cursor-pointer flex items-center gap-2 px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition-colors font-medium"
+        >
+          <FlaskConical size={14} />
+          Test
+        </button>
         {saved && (
           <span className="flex items-center gap-1.5 text-sm text-green-400">
             <CheckCircle2 size={14} /> Saved successfully
           </span>
         )}
       </div>
+
+      {testPanelOpen && (
+        <TestEmailPanel
+          projectId={projectId}
+          onClose={closeTestPanel}
+          closing={testPanelClosing}
+        />
+      )}
     </div>
   );
 }

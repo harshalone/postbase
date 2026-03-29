@@ -22,6 +22,7 @@ import {
   FileText,
   ExternalLink,
   Pencil,
+  Lock,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -113,6 +114,10 @@ const RLS_TEMPLATES = [
   },
 ];
 
+// ─── System tables (created by Postbase, read-only in the UI) ────────────────
+
+const SYSTEM_TABLES = new Set(["users", "accounts", "sessions", "verification_tokens"]);
+
 // ─── Column types for new table ───────────────────────────────────────────────
 
 const COL_TYPES = [
@@ -140,6 +145,9 @@ export default function DatabasePage({
   const [tableOffset, setTableOffset] = useState(0);
   const [tableLoading, setTableLoading] = useState(false);
   const TABLE_LIMIT = 50;
+
+  // Sidebar schema selector: "public" (user tables) or "system"
+  const [publicGroupOpen, setPublicGroupOpen] = useState(true);
 
   // New table dialog
   const newTablePanel = useSlidePanel();
@@ -468,43 +476,65 @@ export default function DatabasePage({
           <div className="flex h-full">
             {/* Table list sidebar */}
             <div className="w-56 shrink-0 border-r border-zinc-800 flex flex-col">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-                <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-                  Tables
-                </span>
-                <div className="flex gap-1">
-                  <button
-                    onClick={fetchTables}
-                    title="Refresh"
-                    className="cursor-pointer p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+              {/* Schema dropdown + actions */}
+              <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <select
+                    value={publicGroupOpen ? "public" : "system"}
+                    onChange={(e) => setPublicGroupOpen(e.target.value === "public")}
+                    className="cursor-pointer w-full appearance-none bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500 pr-6"
                   >
-                    <RefreshCw size={12} />
-                  </button>
+                    <option value="public">public</option>
+                    <option value="system">_system</option>
+                  </select>
+                  <ChevronDown size={11} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+                </div>
+                <button
+                  onClick={fetchTables}
+                  title="Refresh"
+                  className="cursor-pointer p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                >
+                  <RefreshCw size={12} />
+                </button>
+                {publicGroupOpen && (
                   <button
                     onClick={() => newTablePanel.open()}
                     title="New table"
-                    className="cursor-pointer p-1 rounded bg-brand-500 hover:bg-brand-600 text-white transition-colors"
+                    className="cursor-pointer p-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white transition-colors"
                   >
                     <Plus size={12} />
                   </button>
-                </div>
+                )}
               </div>
               <ul className="flex-1 overflow-y-auto py-2">
                 {tablesLoading ? (
                   <li className="px-4 py-3 text-xs text-zinc-600">Loading…</li>
-                ) : tables.length === 0 ? (
-                  <li className="px-4 py-8 text-center text-xs text-zinc-600">
-                    No tables yet.
-                    <br />
-                    <button
-                      onClick={() => newTablePanel.open()}
-                      className="cursor-pointer mt-2 text-brand-400 hover:text-brand-300"
-                    >
-                      Create one
-                    </button>
-                  </li>
-                ) : (
-                  tables.map((t) => (
+                ) : (() => {
+                  const isSystem = !publicGroupOpen;
+                  const visibleTables = isSystem
+                    ? tables.filter((t) => SYSTEM_TABLES.has(t.table_name))
+                    : tables.filter((t) => !SYSTEM_TABLES.has(t.table_name));
+
+                  if (visibleTables.length === 0) {
+                    return (
+                      <li className="px-4 py-8 text-center text-xs text-zinc-600">
+                        {isSystem ? "No system tables found." : (
+                          <>
+                            No tables yet.
+                            <br />
+                            <button
+                              onClick={() => newTablePanel.open()}
+                              className="cursor-pointer mt-2 text-brand-400 hover:text-brand-300"
+                            >
+                              Create one
+                            </button>
+                          </>
+                        )}
+                      </li>
+                    );
+                  }
+
+                  return visibleTables.map((t) => (
                     <li key={t.table_name}>
                       <button
                         onClick={() => handleSelectTable(t.table_name)}
@@ -514,14 +544,17 @@ export default function DatabasePage({
                             : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100"
                         }`}
                       >
-                        <span className="block truncate">{t.table_name}</span>
+                        <span className="flex items-center gap-1.5 truncate">
+                          {isSystem && <Lock size={10} className="shrink-0 text-zinc-600" />}
+                          <span className="truncate">{t.table_name}</span>
+                        </span>
                         <span className="block text-xs text-zinc-600">
                           ~{Number(t.row_estimate).toLocaleString()} rows
                         </span>
                       </button>
                     </li>
-                  ))
-                )}
+                  ));
+                })()}
               </ul>
             </div>
 
