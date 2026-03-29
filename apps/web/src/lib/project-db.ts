@@ -8,9 +8,36 @@ export function getProjectSchema(projectId: string): string {
   return `proj_${projectId.replace(/-/g, "")}`;
 }
 
-// Build a pool for the project (uses per-project DB if configured, else global)
+// Singleton pool cache keyed by connection string.
+const poolCache = new Map<string, Pool>();
+
+function createPool(connectionString: string): Pool {
+  const pool = new Pool({
+    connectionString,
+    max: 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+  });
+  // If a pool encounters a fatal error, remove it from cache so the next
+  // call to getProjectPool creates a fresh one.
+  pool.on("error", (err) => {
+    console.error("[project-db] pool error, evicting from cache:", err.message);
+    poolCache.delete(connectionString);
+  });
+  return pool;
+}
+
 export function getProjectPool(databaseUrl?: string | null): Pool {
-  return new Pool({ connectionString: databaseUrl || process.env.DATABASE_URL! });
+  const connectionString = databaseUrl || process.env.DATABASE_URL!;
+  let pool = poolCache.get(connectionString);
+
+  // Replace pool if it was ended or is missing
+  if (!pool || (pool as unknown as { ending?: boolean }).ending) {
+    pool = createPool(connectionString);
+    poolCache.set(connectionString, pool);
+  }
+
+  return pool;
 }
 
 // Create the schema if it doesn't exist; returns the schema name

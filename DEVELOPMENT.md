@@ -83,6 +83,7 @@ All Postbase platform tables live in the `_postbase` PostgreSQL schema, managed 
 | `storage_connections` | Per-project S3/R2/GCS credentials |
 | `api_keys` | Anon + service role keys per project |
 | `audit_logs` | Action audit trail |
+| `sql_queries` | SQL editor query history — per-project, with visibility (`private`/`shared`/`favorite`) |
 
 ### Per-Project Schema (User Data Isolation)
 
@@ -181,6 +182,8 @@ app/
 │           ├── tables/[tableName]/route.ts ← CRUD rows
 │           ├── tables/[tableName]/columns/route.ts ← ADD COLUMN
 │           ├── sql/route.ts              ← Run arbitrary SQL
+│           ├── sql/history/route.ts     ← GET/POST query history
+│           ├── sql/history/[queryId]/route.ts ← PATCH/DELETE individual history entry
 │           ├── rls/route.ts              ← RLS policy management
 │           ├── cron/route.ts             ← pg_cron job management
 │           ├── queues/route.ts           ← pgmq queue management
@@ -223,7 +226,7 @@ const NAV_ITEMS = [
 const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
 if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-// 2. Get pool (uses project's own DB or global)
+// 2. Get pool (singleton — one pool per database URL, reused across requests)
 const pool = getProjectPool(project.databaseUrl);
 const client = await pool.connect();
 try {
@@ -231,10 +234,25 @@ try {
   const schema = await ensureProjectSchema(client, projectId);
   // ... do work ...
 } finally {
-  client.release();
-  await pool.end();
+  client.release(); // Return connection to pool — never call pool.end()
 }
 ```
+
+> **Important**: `getProjectPool` returns a singleton `Pool` cached in a `Map<string, Pool>` keyed by connection string. Never call `pool.end()` in route handlers — only `client.release()`.
+
+### SQL execution pattern
+
+For arbitrary SQL that must stay scoped to the project schema, wrap in a transaction and use `SET LOCAL`:
+
+```typescript
+await client.query("BEGIN");
+await client.query(`SET LOCAL search_path TO "${schema}", public`);
+const result = await client.query(userSql);
+await client.query("COMMIT");
+// On error: await client.query("ROLLBACK");
+```
+
+`SET LOCAL` ensures the `search_path` only applies within the transaction, preventing leakage across pooled connections.
 
 ### Response shape conventions
 - Success: `{ ok: true }` or `{ data: ... }`
@@ -299,7 +317,7 @@ Three tabs — all client-side data fetching. No header/description — tab butt
 | Tab | Features |
 |---|---|
 | Tables | Left sidebar table list, row data grid with column headers, sort/filter toolbar, Insert dropdown menu, pagination, Data/Definition toggle |
-| SQL Editor | Write + run SQL (⌘+Enter), results grid, error display |
+| SQL Editor | History sidebar (Private/Shared/Favorites), write + run SQL (⌘+Enter), auto-saves every run, results grid, error display |
 | RLS Policies | Left sidebar table list (green dot = RLS on), right panel shows policies for selected table |
 
 ### Tables tab details
@@ -337,6 +355,28 @@ All RLS actions run **real SQL** against PostgreSQL via `POST /api/dashboard/[pr
 Policies are read from `pg_policies` and RLS state from `pg_class.relrowsecurity` — live database state, not cached.
 
 > ⚠️ Template expressions like `auth.uid()` are Supabase-specific. On plain PostgreSQL use `current_setting('app.user_id', true)::uuid` or similar that your app sets via `SET LOCAL`.
+
+### SQL Editor — Query History
+
+Every query run in the SQL editor is auto-saved to `_postbase.sql_queries`. The history sidebar shows 3 sections:
+
+| Section | Visibility value | Behaviour |
+|---|---|---|
+| Favorites | `favorite` | Starred queries — shown first |
+| Shared | `shared` | Visible to all team members (future) |
+| Private | `private` | Default; only saved by the runner |
+
+Clicking a history item loads it into the editor. Hover actions: star (→ favorite), share/unshare, rename (inline), delete.
+
+### SQL Editor API routes
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/dashboard/[projectId]/sql` | POST | Execute arbitrary SQL in project schema |
+| `/api/dashboard/[projectId]/sql/history` | GET | List last 200 queries for project |
+| `/api/dashboard/[projectId]/sql/history` | POST | Save a query (auto-called by editor on run) |
+| `/api/dashboard/[projectId]/sql/history/[queryId]` | PATCH | Rename (`name`) or change visibility |
+| `/api/dashboard/[projectId]/sql/history/[queryId]` | DELETE | Remove history entry |
 
 ### New API routes added
 

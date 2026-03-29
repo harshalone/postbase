@@ -156,7 +156,7 @@ function LeftPanel({
   return (
     <div className="w-52 shrink-0 border-r border-zinc-800 flex flex-col overflow-hidden">
       {/* Top nav */}
-      <div className="px-3 py-3 border-b border-zinc-800 flex items-center gap-2">
+      <div className="px-3 h-12 shrink-0 border-b border-zinc-800 flex items-center gap-2">
         <button
           onClick={() => router.push(`/dashboard/${projectId}/storage`)}
           className="cursor-pointer p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
@@ -284,7 +284,7 @@ function DetailPanel({
   return (
     <div className="w-80 shrink-0 border-l border-zinc-800 flex flex-col overflow-hidden bg-zinc-950">
       {/* Header — just the X button, no title */}
-      <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+      <div className="px-4 h-12 shrink-0 border-b border-zinc-800 flex items-center justify-between">
         <span className="text-xs text-zinc-600 truncate">{name}</span>
         <button
           onClick={onClose}

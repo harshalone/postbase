@@ -69,7 +69,6 @@ export async function GET(
     return NextResponse.json({ error: String(err) }, { status: 500 });
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
@@ -113,6 +112,5 @@ export async function POST(
     return NextResponse.json({ error: String(err) }, { status: 500 });
   } finally {
     client.release();
-    await pool.end();
   }
 }

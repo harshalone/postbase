@@ -16,18 +16,23 @@ import {
   Loader2,
   Activity,
   Check,
+  Star,
+  Users,
+  Lock,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface SavedQuery {
+interface HistoryQuery {
   id: string;
-  name: string;
+  name: string | null;
   sql: string;
-  isFavorite: boolean;
-  createdAt: number;
+  visibility: "private" | "shared" | "favorite";
+  executedAt: string;
 }
 
 interface QueryTab {
@@ -54,21 +59,6 @@ function makeTab(name = "New query"): QueryTab {
   return { id: uid(), name, sql: "" };
 }
 
-const STORAGE_KEY = "postbase-sql-queries";
-
-function loadSaved(projectId: string): SavedQuery[] {
-  try {
-    const raw = localStorage.getItem(`${STORAGE_KEY}-${projectId}`);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveToDisk(projectId: string, queries: SavedQuery[]) {
-  localStorage.setItem(`${STORAGE_KEY}-${projectId}`, JSON.stringify(queries));
-}
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function SqlEditorPage({
@@ -85,7 +75,10 @@ export default function SqlEditorPage({
 
   // Sidebar
   const [search, setSearch] = useState("");
-  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
+  const [history, setHistory] = useState<HistoryQuery[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const [collapsed, setCollapsed] = useState({ shared: false, favorites: false, private: false });
 
   // Results
@@ -131,10 +124,21 @@ export default function SqlEditorPage({
     window.addEventListener("mouseup", onUp);
   }, [resultsHeight]);
 
-  // Load saved queries from localStorage
-  useEffect(() => {
-    setSavedQueries(loadSaved(projectId));
+  // Load history from API
+  const fetchHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/dashboard/${projectId}/sql/history`);
+      const data = await res.json();
+      setHistory(data.queries ?? []);
+    } finally {
+      setHistoryLoading(false);
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   // ─── Tab helpers ───────────────────────────────────────────────────────────
 
@@ -192,47 +196,70 @@ export default function SqlEditorPage({
         const data = await res.json();
         setResults((r) => ({ ...r, [activeId]: data }));
       }
+      // Auto-save to history (fire-and-forget, update local state)
+      const saveRes = await fetch(`/api/dashboard/${projectId}/sql/history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql }),
+      });
+      const saveData = await saveRes.json();
+      if (saveData.query) {
+        setHistory((prev) => [saveData.query, ...prev].slice(0, 200));
+      }
     } finally {
       setRunning(false);
     }
   }, [activeTab.sql, activeId, projectId, resultTab]);
 
-  // ─── Saved queries ─────────────────────────────────────────────────────────
+  // ─── History actions ───────────────────────────────────────────────────────
 
-  function saveQuery() {
+  async function updateVisibility(id: string, visibility: HistoryQuery["visibility"]) {
+    const res = await fetch(`/api/dashboard/${projectId}/sql/history/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility }),
+    });
+    const data = await res.json();
+    if (data.query) {
+      setHistory((prev) => prev.map((q) => (q.id === id ? data.query : q)));
+    }
+  }
+
+  async function renameHistory(id: string, name: string) {
+    const res = await fetch(`/api/dashboard/${projectId}/sql/history/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    if (data.query) {
+      setHistory((prev) => prev.map((q) => (q.id === id ? data.query : q)));
+    }
+    setRenamingId(null);
+  }
+
+  async function deleteHistory(id: string) {
+    await fetch(`/api/dashboard/${projectId}/sql/history/${id}`, { method: "DELETE" });
+    setHistory((prev) => prev.filter((q) => q.id !== id));
+  }
+
+  function loadHistoryQuery(q: HistoryQuery) {
+    setTabs((prev) => prev.map((t) => t.id === activeId ? { ...t, sql: q.sql } : t));
+    setResults((r) => ({ ...r, [activeId]: null }));
+  }
+
+  // ─── Saved queries (name modal) ────────────────────────────────────────────
+
+  async function saveQuery() {
     if (!saveName.trim()) return;
-    const q: SavedQuery = {
-      id: uid(),
-      name: saveName.trim(),
-      sql: activeTab.sql,
-      isFavorite: false,
-      createdAt: Date.now(),
-    };
-    const next = [q, ...savedQueries];
-    setSavedQueries(next);
-    saveToDisk(projectId, next);
-    // Rename tab
-    setTabs((prev) => prev.map((t) => t.id === activeId ? { ...t, name: q.name } : t));
+    // Find the most recently added private query and rename it
+    const latest = history.find((q) => q.visibility === "private");
+    if (latest) {
+      await renameHistory(latest.id, saveName.trim());
+    }
+    setTabs((prev) => prev.map((t) => t.id === activeId ? { ...t, name: saveName.trim() } : t));
     setSaveModal(false);
     setSaveName("");
-  }
-
-  function toggleFavorite(id: string) {
-    const next = savedQueries.map((q) => q.id === id ? { ...q, isFavorite: !q.isFavorite } : q);
-    setSavedQueries(next);
-    saveToDisk(projectId, next);
-  }
-
-  function deleteQuery(id: string) {
-    const next = savedQueries.filter((q) => q.id !== id);
-    setSavedQueries(next);
-    saveToDisk(projectId, next);
-  }
-
-  function loadQuery(q: SavedQuery) {
-    // Open in current tab or a new tab
-    setTabs((prev) => prev.map((t) => t.id === activeId ? { ...t, name: q.name, sql: q.sql } : t));
-    setResults((r) => ({ ...r, [activeId]: null }));
   }
 
   // ─── Export CSV ────────────────────────────────────────────────────────────
@@ -261,11 +288,14 @@ export default function SqlEditorPage({
 
   // ─── Sidebar query filter ──────────────────────────────────────────────────
 
-  const filtered = savedQueries.filter((q) =>
-    q.name.toLowerCase().includes(search.toLowerCase())
-  );
-  const favorites = filtered.filter((q) => q.isFavorite);
-  const privates = filtered.filter((q) => !q.isFavorite);
+  const filtered = history.filter((q) => {
+    if (!search) return true;
+    const label = q.name ?? q.sql;
+    return label.toLowerCase().includes(search.toLowerCase());
+  });
+  const favorites = filtered.filter((q) => q.visibility === "favorite");
+  const shared = filtered.filter((q) => q.visibility === "shared");
+  const privates = filtered.filter((q) => q.visibility === "private");
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -298,39 +328,71 @@ export default function SqlEditorPage({
 
         {/* Sections */}
         <div className="flex-1 overflow-y-auto py-1">
-          {/* SHARED */}
-          <Section
-            label="Shared"
-            count={0}
-            collapsed={collapsed.shared}
-            onToggle={() => setCollapsed((c) => ({ ...c, shared: !c.shared }))}
-          >
-            <EmptyState
-              title="No shared queries"
-              subtitle="Share queries with your team by right-clicking on the query."
-            />
-          </Section>
+          {historyLoading && (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 size={12} className="animate-spin text-zinc-600" />
+            </div>
+          )}
 
           {/* FAVORITES */}
           <Section
             label="Favorites"
+            icon={Star}
             count={favorites.length}
             collapsed={collapsed.favorites}
             onToggle={() => setCollapsed((c) => ({ ...c, favorites: !c.favorites }))}
           >
             {favorites.length === 0 ? (
               <EmptyState
-                title="No favorite queries"
-                subtitle={`Save a query to favorites for easy accessibility by clicking the ♡ icon.`}
+                title="No favorites yet"
+                subtitle="Click the star on any query to add it here."
               />
             ) : (
               favorites.map((q) => (
-                <QueryItem
+                <HistoryItem
                   key={q.id}
                   query={q}
-                  onLoad={() => loadQuery(q)}
-                  onToggleFavorite={() => toggleFavorite(q.id)}
-                  onDelete={() => deleteQuery(q.id)}
+                  renamingId={renamingId}
+                  renameValue={renameValue}
+                  onRenameValueChange={setRenameValue}
+                  onLoad={() => loadHistoryQuery(q)}
+                  onVisibility={(v) => updateVisibility(q.id, v)}
+                  onRename={() => { setRenamingId(q.id); setRenameValue(q.name ?? ""); }}
+                  onRenameConfirm={() => renameHistory(q.id, renameValue)}
+                  onRenameCancel={() => setRenamingId(null)}
+                  onDelete={() => deleteHistory(q.id)}
+                />
+              ))
+            )}
+          </Section>
+
+          {/* SHARED */}
+          <Section
+            label="Shared"
+            icon={Users}
+            count={shared.length}
+            collapsed={collapsed.shared}
+            onToggle={() => setCollapsed((c) => ({ ...c, shared: !c.shared }))}
+          >
+            {shared.length === 0 ? (
+              <EmptyState
+                title="No shared queries"
+                subtitle="Click the share icon on any query to share it."
+              />
+            ) : (
+              shared.map((q) => (
+                <HistoryItem
+                  key={q.id}
+                  query={q}
+                  renamingId={renamingId}
+                  renameValue={renameValue}
+                  onRenameValueChange={setRenameValue}
+                  onLoad={() => loadHistoryQuery(q)}
+                  onVisibility={(v) => updateVisibility(q.id, v)}
+                  onRename={() => { setRenamingId(q.id); setRenameValue(q.name ?? ""); }}
+                  onRenameConfirm={() => renameHistory(q.id, renameValue)}
+                  onRenameCancel={() => setRenamingId(null)}
+                  onDelete={() => deleteHistory(q.id)}
                 />
               ))
             )}
@@ -339,23 +401,30 @@ export default function SqlEditorPage({
           {/* PRIVATE */}
           <Section
             label="Private"
+            icon={Lock}
             count={privates.length}
             collapsed={collapsed.private}
             onToggle={() => setCollapsed((c) => ({ ...c, private: !c.private }))}
           >
             {privates.length === 0 ? (
               <EmptyState
-                title="No private queries"
-                subtitle="Queries you save will appear here."
+                title="No history yet"
+                subtitle="Queries you run will appear here automatically."
               />
             ) : (
               privates.map((q) => (
-                <QueryItem
+                <HistoryItem
                   key={q.id}
                   query={q}
-                  onLoad={() => loadQuery(q)}
-                  onToggleFavorite={() => toggleFavorite(q.id)}
-                  onDelete={() => deleteQuery(q.id)}
+                  renamingId={renamingId}
+                  renameValue={renameValue}
+                  onRenameValueChange={setRenameValue}
+                  onLoad={() => loadHistoryQuery(q)}
+                  onVisibility={(v) => updateVisibility(q.id, v)}
+                  onRename={() => { setRenamingId(q.id); setRenameValue(q.name ?? ""); }}
+                  onRenameConfirm={() => renameHistory(q.id, renameValue)}
+                  onRenameCancel={() => setRenamingId(null)}
+                  onDelete={() => deleteHistory(q.id)}
                 />
               ))
             )}
@@ -532,7 +601,12 @@ export default function SqlEditorPage({
           <div className="flex-1 overflow-auto">
             {resultTab === "results" && (
               <>
-                {!result ? (
+                {running ? (
+                  <div className="h-full flex items-center justify-center gap-2 text-zinc-500 text-sm">
+                    <Loader2 size={14} className="animate-spin text-brand-400" />
+                    Running query…
+                  </div>
+                ) : !result ? (
                   <div className="h-full flex items-center justify-center text-zinc-600 text-sm">
                     Click Run to execute your query.
                   </div>
@@ -587,7 +661,12 @@ export default function SqlEditorPage({
 
             {resultTab === "explain" && (
               <>
-                {!explainResult ? (
+                {running ? (
+                  <div className="h-full flex items-center justify-center gap-2 text-zinc-500 text-sm">
+                    <Loader2 size={14} className="animate-spin text-brand-400" />
+                    Analyzing query…
+                  </div>
+                ) : !explainResult ? (
                   <div className="h-full flex items-center justify-center text-zinc-600 text-sm">
                     Run a query to see the execution plan.
                   </div>
@@ -678,12 +757,14 @@ export default function SqlEditorPage({
 
 function Section({
   label,
+  icon: Icon,
   count,
   collapsed,
   onToggle,
   children,
 }: {
   label: string;
+  icon: React.ElementType;
   count: number;
   collapsed: boolean;
   onToggle: () => void;
@@ -696,6 +777,7 @@ function Section({
         className="cursor-pointer w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider hover:text-zinc-300 transition-colors"
       >
         {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+        <Icon size={10} className="shrink-0" />
         {label}
         {count > 0 && (
           <span className="ml-auto text-[10px] font-normal text-zinc-600 normal-case tracking-normal">
@@ -704,6 +786,104 @@ function Section({
         )}
       </button>
       {!collapsed && children}
+    </div>
+  );
+}
+
+function HistoryItem({
+  query,
+  renamingId,
+  renameValue,
+  onRenameValueChange,
+  onLoad,
+  onVisibility,
+  onRename,
+  onRenameConfirm,
+  onRenameCancel,
+  onDelete,
+}: {
+  query: HistoryQuery;
+  renamingId: string | null;
+  renameValue: string;
+  onRenameValueChange: (v: string) => void;
+  onLoad: () => void;
+  onVisibility: (v: HistoryQuery["visibility"]) => void;
+  onRename: () => void;
+  onRenameConfirm: () => void;
+  onRenameCancel: () => void;
+  onDelete: () => void;
+}) {
+  if (renamingId === query.id) {
+    return (
+      <div className="flex items-center gap-1 px-2 py-1.5">
+        <input
+          autoFocus
+          className="flex-1 bg-zinc-800 text-zinc-200 text-xs px-2 py-1 rounded focus:outline-none"
+          value={renameValue}
+          onChange={(e) => onRenameValueChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onRenameConfirm();
+            if (e.key === "Escape") onRenameCancel();
+          }}
+        />
+        <button onClick={onRenameConfirm} className="cursor-pointer p-1 text-green-400 hover:text-green-300">
+          <Check size={11} />
+        </button>
+        <button onClick={onRenameCancel} className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-300">
+          <X size={11} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group border-b border-zinc-900/50">
+      <div
+        onClick={onLoad}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === "Enter" && onLoad()}
+        className="cursor-pointer w-full text-left px-3 py-2 hover:bg-zinc-800/60 transition-colors"
+      >
+        <div className="text-[11px] text-zinc-300 truncate flex items-center gap-1.5">
+          <List size={10} className="text-zinc-600 shrink-0" />
+          {query.name ?? query.sql.replace(/\s+/g, " ").slice(0, 50)}
+        </div>
+        <div className="text-[10px] text-zinc-600 mt-0.5 pl-4">
+          {new Date(query.executedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+        </div>
+        {/* Hover actions */}
+        <div className="hidden group-hover:flex items-center gap-1 mt-1 pl-4">
+          <button
+            onClick={(e) => { e.stopPropagation(); onVisibility("favorite"); }}
+            title="Favorite"
+            className={`cursor-pointer p-0.5 rounded transition-colors ${query.visibility === "favorite" ? "text-yellow-400" : "text-zinc-600 hover:text-yellow-400"}`}
+          >
+            <Star size={10} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onVisibility(query.visibility === "shared" ? "private" : "shared"); }}
+            title={query.visibility === "shared" ? "Make private" : "Share"}
+            className={`cursor-pointer p-0.5 rounded transition-colors ${query.visibility === "shared" ? "text-blue-400" : "text-zinc-600 hover:text-blue-400"}`}
+          >
+            <Users size={10} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onRename(); }}
+            title="Rename"
+            className="cursor-pointer p-0.5 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+          >
+            <Pencil size={10} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            title="Delete"
+            className="cursor-pointer p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors ml-auto"
+          >
+            <Trash2 size={10} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -717,50 +897,3 @@ function EmptyState({ title, subtitle }: { title: string; subtitle: string }) {
   );
 }
 
-function QueryItem({
-  query,
-  onLoad,
-  onToggleFavorite,
-  onDelete,
-}: {
-  query: SavedQuery;
-  onLoad: () => void;
-  onToggleFavorite: () => void;
-  onDelete: () => void;
-}) {
-  const [hover, setHover] = useState(false);
-
-  return (
-    <div
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-zinc-800/60 transition-colors group"
-    >
-      <button
-        onClick={onLoad}
-        className="cursor-pointer flex-1 text-left text-[11px] text-zinc-400 hover:text-zinc-200 truncate"
-      >
-        <span className="inline-flex items-center gap-1.5">
-          <List size={10} className="text-zinc-600 shrink-0" />
-          {query.name}
-        </span>
-      </button>
-      {hover && (
-        <div className="flex items-center gap-0.5 shrink-0">
-          <button
-            onClick={onToggleFavorite}
-            className="cursor-pointer p-0.5 rounded text-zinc-600 hover:text-brand-400 transition-colors"
-          >
-            <Heart size={10} fill={query.isFavorite ? "currentColor" : "none"} className={query.isFavorite ? "text-brand-400" : ""} />
-          </button>
-          <button
-            onClick={onDelete}
-            className="cursor-pointer p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors"
-          >
-            <X size={10} />
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}

@@ -63,6 +63,5 @@ export async function PATCH(
     });
   } finally {
     client.release();
-    await pool.end();
   }
 }

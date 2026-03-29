@@ -94,7 +94,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ fn:
     return Response.json({ error: message }, { status: 400 });
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
@@ -123,6 +122,5 @@ export async function HEAD(req: NextRequest, { params }: { params: Promise<{ fn:
     return new Response(null, { status: 400 });
   } finally {
     client.release();
-    await pool.end();
   }
 }

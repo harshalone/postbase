@@ -1,9 +1,9 @@
 /**
- * POST /api/auth/v1/[projectId]/otp
+ * POST /api/auth/v1/[projectId]/email-otp
  *
- * Send a magic link / OTP to the user's email.
+ * Send a 6-digit OTP code to the user's email.
  * Requires: Authorization: Bearer <anon-key>
- * Body: { email, redirectTo? }
+ * Body: { email }
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
@@ -12,14 +12,16 @@ import { emailSettings, emailTemplates } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
-import { nanoid } from "nanoid";
 import { createTransport } from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
 const bodySchema = z.object({
   email: z.string().email(),
-  redirectTo: z.string().url().optional(),
 });
+
+function generateOtp(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
@@ -39,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { email, redirectTo } = parsed.data;
+  const { email } = parsed.data;
 
   const schema = getProjectSchema(keyInfo.projectId);
   const pool = getProjectPool();
@@ -47,7 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   try {
     await ensureProjectAuthTables(client, schema);
 
-    // Upsert user — create if not exists
+    // Upsert user
     const { rows: [existing] } = await client.query(
       `SELECT id FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,
       [email]
@@ -59,10 +61,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       );
     }
 
-    const token = nanoid(64);
-    const expires = new Date(Date.now() + 60 * 60 * 1000);
+    const code = generateOtp();
+    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    // Delete any existing token for this email then insert new one
+    // Delete existing OTP tokens for this email, insert new one
     await client.query(
       `DELETE FROM "${schema}"."verification_tokens" WHERE "identifier" = $1`,
       [email]
@@ -70,13 +72,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     await client.query(
       `INSERT INTO "${schema}"."verification_tokens" ("identifier", "token", "expires")
        VALUES ($1, $2, $3)`,
-      [email, token, expires]
+      [email, code, expires]
     );
 
-    const baseUrl = process.env.NEXTAUTH_URL ?? req.nextUrl.origin;
-    const magicLink = `${baseUrl}/api/auth/v1/${projectId}/verify?token=${token}&email=${encodeURIComponent(email)}${redirectTo ? `&redirectTo=${encodeURIComponent(redirectTo)}` : ""}`;
-
-    // Email settings still live in _postbase (project config, not user data)
     const [settings] = await db
       .select()
       .from(emailSettings)
@@ -90,7 +88,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
     if (!emailConfigured) {
       if (process.env.NODE_ENV === "development") {
-        return Response.json({ message: "OTP sent", _dev_magic_link: magicLink });
+        return Response.json({ message: "OTP sent", _dev_otp: code });
       }
       return Response.json({ error: "Email not configured for this project" }, { status: 500 });
     }
@@ -98,13 +96,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     const [template] = await db
       .select()
       .from(emailTemplates)
-      .where(and(eq(emailTemplates.projectId, keyInfo.projectId), eq(emailTemplates.type, "magic_link")))
+      .where(and(eq(emailTemplates.projectId, keyInfo.projectId), eq(emailTemplates.type, "otp")))
       .limit(1);
 
-    const subject = template?.subject ?? "Your magic link";
+    const subject = template?.subject ?? "Your verification code";
     const htmlBody = template?.body
-      ? template.body.replace("{{magic_link}}", magicLink).replace("{{email}}", email)
-      : `<p>Click <a href="${magicLink}">here</a> to sign in.</p>`;
+      ? template.body
+          .replace(/\{\{code\}\}/g, code)
+          .replace(/\{\{email\}\}/g, email)
+          .replace(/\{\{expires_in\}\}/g, "10 minutes")
+      : `<p>Your verification code is: <strong>${code}</strong></p><p>This code expires in 10 minutes.</p>`;
 
     let transportConfig: SMTPTransport.Options;
 
@@ -135,12 +136,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     const fromEmail = settings.sesFrom ?? settings.smtpFrom ?? settings.smtpUser ?? undefined;
     const fromName = settings.sesFromName ?? settings.smtpFromName ?? undefined;
     const from = fromEmail && fromName ? `"${fromName}" <${fromEmail}>` : fromEmail;
-    await transporter.sendMail({
-      from,
-      to: email,
-      subject,
-      html: htmlBody,
-    });
+
+    await transporter.sendMail({ from, to: email, subject, html: htmlBody });
 
     return Response.json({ message: "OTP sent" });
   } finally {

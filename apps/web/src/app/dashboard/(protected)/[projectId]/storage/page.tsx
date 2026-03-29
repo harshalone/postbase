@@ -178,6 +178,46 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+// ─── Masked key field (show/hide + copy) ─────────────────────────────────────
+
+function MaskedField({ value, mono = true }: { value: string; mono?: boolean }) {
+  const [visible, setVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  const display = visible ? value : value.slice(0, 4) + "••••••••••••";
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={`text-xs text-zinc-400 ${mono ? "font-mono" : ""}`}>
+        {display}
+      </span>
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        className="cursor-pointer text-zinc-600 hover:text-zinc-300 transition-colors"
+        title={visible ? "Hide" : "Reveal"}
+      >
+        {visible ? <EyeOff size={11} /> : <Eye size={11} />}
+      </button>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="cursor-pointer text-zinc-600 hover:text-zinc-300 transition-colors"
+        title="Copy"
+      >
+        {copied ? <Check size={11} /> : <Copy size={11} />}
+      </button>
+    </span>
+  );
+}
+
 // ─── Cloudflare R2 setup guide ─────────────────────────────────────────────────
 
 function R2SetupGuide({ bucket }: { bucket: string }) {
@@ -372,9 +412,7 @@ function ConnectionRow({
         </span>
       </td>
       <td className="px-6 py-4">
-        <span className="text-xs font-mono text-zinc-500">
-          {conn.accessKeyId}
-        </span>
+        <MaskedField value={conn.accessKeyId} />
       </td>
       <td className="px-6 py-4 text-right">
         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -637,15 +675,19 @@ function ConnectionForm({
                   ? "From R2 API token → Secret Access Key"
                   : "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
             }
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 pr-10 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 pr-16 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
           />
-          <button
-            type="button"
-            onClick={() => setShowSecret((v) => !v)}
-            className="cursor-pointer absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-300"
-          >
-            {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
+          <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setShowSecret((v) => !v)}
+              className="cursor-pointer text-zinc-600 hover:text-zinc-300"
+              title={showSecret ? "Hide" : "Reveal"}
+            >
+              {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+            <CopyButton text={form.secretAccessKey} />
+          </div>
         </div>
         {form.provider === "r2" && (
           <p className="mt-1 text-[11px] text-zinc-600">

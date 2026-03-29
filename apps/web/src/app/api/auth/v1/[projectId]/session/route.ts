@@ -91,6 +91,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     return Response.json({ session: null });
   } finally {
     client.release();
-    await pool.end();
   }
 }

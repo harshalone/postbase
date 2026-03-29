@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, use } from "react";
+import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
+
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 import { useSlidePanel } from "@/hooks/use-slide-panel";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -23,6 +27,12 @@ import {
   ExternalLink,
   Pencil,
   Lock,
+  Star,
+  Users,
+  Clock,
+  MoreHorizontal,
+  Check,
+  Copy,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -53,7 +63,15 @@ type Policy = {
 
 type RlsTable = { tablename: string; rls_enabled: boolean };
 
-type Tab = "tables" | "rls";
+type Tab = "tables" | "rls" | "sql";
+
+type SqlQuery = {
+  id: string;
+  sql: string;
+  name: string | null;
+  visibility: "private" | "shared" | "favorite";
+  executedAt: string;
+};
 
 // ─── RLS Templates ────────────────────────────────────────────────────────────
 
@@ -133,6 +151,7 @@ export default function DatabasePage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
+  const router = useRouter();
   const toast = useToast();
   const [tab, setTab] = useState<Tab>("tables");
 
@@ -162,6 +181,7 @@ export default function DatabasePage({
   const [creatingTable, setCreatingTable] = useState(false);
   const [dragColIndex, setDragColIndex] = useState<number | null>(null);
   const [tableView, setTableView] = useState<"data" | "definition">("data");
+  const [defCopied, setDefCopied] = useState(false);
   const [showInsertMenu, setShowInsertMenu] = useState(false);
   const insertRowPanel = useSlidePanel();
   const showInsertRow = insertRowPanel.visible;
@@ -174,7 +194,22 @@ export default function DatabasePage({
   const [insertColLoading, setInsertColLoading] = useState(false);
   const [createMoreCol, setCreateMoreCol] = useState(false);
 
+
   // SQL editor state
+  const [sqlQuery, setSqlQuery] = useState("");
+  const [sqlRunning, setSqlRunning] = useState(false);
+  const [sqlResult, setSqlResult] = useState<{
+    rows: Record<string, unknown>[];
+    fields: { name: string }[];
+    rowCount: number | null;
+    command: string;
+    schema: string;
+  } | null>(null);
+  const [sqlError, setSqlError] = useState<string | null>(null);
+  const [sqlHistory, setSqlHistory] = useState<SqlQuery[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   // RLS state
   const [policies, setPolicies] = useState<Policy[]>([]);
@@ -214,6 +249,10 @@ export default function DatabasePage({
     try {
       const res = await fetch(`/api/dashboard/${projectId}/tables`);
       const data = await res.json();
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
       setTables(data.tables ?? []);
     } finally {
       setTablesLoading(false);
@@ -238,6 +277,17 @@ export default function DatabasePage({
     [projectId]
   );
 
+  const fetchHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/dashboard/${projectId}/sql/history`);
+      const data = await res.json();
+      setSqlHistory(data.queries ?? []);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [projectId]);
+
   const fetchRls = useCallback(async () => {
     setRlsLoading(true);
     try {
@@ -256,7 +306,9 @@ export default function DatabasePage({
 
   useEffect(() => {
     if (tab === "rls") fetchRls();
-  }, [tab, fetchRls]);
+    if (tab === "tables") fetchTables();
+    if (tab === "sql") fetchHistory();
+  }, [tab, fetchRls, fetchTables, fetchHistory]);
 
   function handleSelectTable(name: string) {
     setSelectedTable(name);
@@ -309,6 +361,72 @@ export default function DatabasePage({
   }
 
   // ─── SQL runner ─────────────────────────────────────────────────────────────
+
+  async function runSql() {
+    if (!sqlQuery.trim()) return;
+    setSqlRunning(true);
+    setSqlError(null);
+    setSqlResult(null);
+    try {
+      const res = await fetch(`/api/dashboard/${projectId}/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: sqlQuery }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setSqlError(data.error);
+      } else {
+        setSqlResult(data);
+        const ddl = new Set(["CREATE", "DROP", "ALTER", "TRUNCATE", "RENAME", "COMMENT"]);
+        if (ddl.has(data.command)) fetchTables();
+      }
+      // Auto-save to history regardless of error
+      const saveRes = await fetch(`/api/dashboard/${projectId}/sql/history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: sqlQuery }),
+      });
+      const saveData = await saveRes.json();
+      if (saveData.query) {
+        setSqlHistory((prev) => [saveData.query, ...prev].slice(0, 200));
+      }
+    } catch (err) {
+      setSqlError(String(err));
+    } finally {
+      setSqlRunning(false);
+    }
+  }
+
+  async function updateQueryVisibility(id: string, visibility: SqlQuery["visibility"]) {
+    const res = await fetch(`/api/dashboard/${projectId}/sql/history/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility }),
+    });
+    const data = await res.json();
+    if (data.query) {
+      setSqlHistory((prev) => prev.map((q) => (q.id === id ? data.query : q)));
+    }
+  }
+
+  async function renameQuery(id: string, name: string) {
+    const res = await fetch(`/api/dashboard/${projectId}/sql/history/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    if (data.query) {
+      setSqlHistory((prev) => prev.map((q) => (q.id === id ? data.query : q)));
+    }
+    setRenamingId(null);
+  }
+
+  async function deleteQuery(id: string) {
+    await fetch(`/api/dashboard/${projectId}/sql/history/${id}`, { method: "DELETE" });
+    setSqlHistory((prev) => prev.filter((q) => q.id !== id));
+  }
 
   // ─── Create table ────────────────────────────────────────────────────────────
 
@@ -451,6 +569,7 @@ export default function DatabasePage({
             [
               { id: "tables", label: "Tables", icon: Table2 },
               { id: "rls", label: "RLS Policies", icon: Shield },
+              { id: "sql", label: "SQL Editor", icon: FileText },
             ] as const
           ).map(({ id, label, icon: Icon }) => (
             <button
@@ -622,7 +741,7 @@ export default function DatabasePage({
                                 icon: FileText,
                                 label: "Import data from CSV",
                                 sub: "Insert new rows from a CSV",
-                                onClick: () => setShowInsertMenu(false),
+                                onClick: () => { setShowInsertMenu(false); router.push(`/dashboard/${projectId}/database/import/${selectedTable}`); },
                               },
                             ].map(({ icon: Icon, label, sub, onClick }) => (
                               <button
@@ -644,38 +763,58 @@ export default function DatabasePage({
                   </div>
 
                   {/* Data / Definition view */}
-                  {tableView === "definition" ? (
+                  {tableView === "definition" ? ((() => {
+                    const cols = selectedTableMeta?.columns ?? [];
+                    const lines = cols.map((col) => {
+                      let line = `  "${col.column_name}" ${col.data_type}`;
+                      if (col.is_nullable === "NO") line += " NOT NULL";
+                      if (col.column_default) line += ` DEFAULT ${col.column_default}`;
+                      return line;
+                    });
+                    const ddl = `CREATE TABLE "${selectedTable}" (\n${lines.join(",\n")}\n);`;
+                    return (
+                      <div className="flex-1 overflow-auto relative">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(ddl);
+                            setDefCopied(true);
+                            setTimeout(() => setDefCopied(false), 2000);
+                          }}
+                          className="cursor-pointer absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs transition-colors border border-zinc-700"
+                        >
+                          {defCopied ? <><Check size={12} className="text-green-400" /> Copied</> : <><Copy size={12} /> Copy</>}
+                        </button>
+                        <MonacoEditor
+                          height="100%"
+                          language="sql"
+                          theme="vs-dark"
+                          value={ddl}
+                          options={{
+                            readOnly: true,
+                            minimap: { enabled: false },
+                            scrollBeyondLastLine: false,
+                            lineNumbers: "on",
+                            fontSize: 13,
+                            glyphMargin: false,
+                            folding: false,
+                            lineDecorationsWidth: 16,
+                            lineNumbersMinChars: 3,
+                            overviewRulerLanes: 0,
+                            renderLineHighlight: "none",
+                            padding: { top: 12, bottom: 12 },
+                            automaticLayout: true,
+                            wordWrap: "on",
+                            domReadOnly: true,
+                          }}
+                        />
+                      </div>
+                    );
+                  })()) : (
                     <div className="flex-1 overflow-auto">
                       <table className="w-full text-xs border-collapse">
                         <thead className="sticky top-0 bg-zinc-950 z-10">
                           <tr className="border-b border-zinc-800">
-                            {["Name", "Type", "Nullable", "Default"].map((h) => (
-                              <th key={h} className="text-left px-4 py-2.5 text-zinc-500 font-medium whitespace-nowrap border-r border-zinc-800 last:border-r-0">
-                                {h}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedTableMeta?.columns.map((col, i) => (
-                            <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
-                              <td className="px-4 py-2.5 text-zinc-200 font-mono border-r border-zinc-800">{col.column_name}</td>
-                              <td className="px-4 py-2.5 border-r border-zinc-800">
-                                <span className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-400 font-mono">{col.data_type}</span>
-                              </td>
-                              <td className="px-4 py-2.5 text-zinc-400 border-r border-zinc-800">{col.is_nullable === "YES" ? "YES" : "NO"}</td>
-                              <td className="px-4 py-2.5 text-zinc-500 font-mono">{col.column_default ?? "—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="flex-1 overflow-auto">
-                      <table className="w-full text-xs border-collapse">
-                        <thead className="sticky top-0 bg-zinc-950 z-10">
-                          <tr className="border-b border-zinc-800">
-                            <th className="w-10 px-3 py-2.5 border-r border-zinc-800 bg-zinc-950 text-zinc-700 font-normal select-none" />
+                            <th className="w-10 px-3 py-2.5 border-r border-zinc-800 bg-zinc-950 text-zinc-700 font-normal select-none">#</th>
                             {selectedTableMeta?.columns.map((col) => (
                               <th
                                 key={col.column_name}
@@ -792,6 +931,199 @@ export default function DatabasePage({
         )}
 
         {/* ── SQL Editor Tab ── */}
+        {tab === "sql" && (
+          <div className="flex h-full overflow-hidden">
+            {/* ── History sidebar ── */}
+            <div className="w-60 shrink-0 border-r border-zinc-800 flex flex-col bg-zinc-950 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-3 border-b border-zinc-800 shrink-0">
+                <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">History</span>
+                {historyLoading && <RefreshCw size={11} className="animate-spin text-zinc-600" />}
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {(["favorite", "shared", "private"] as const).map((section) => {
+                  const items = sqlHistory.filter((q) => q.visibility === section);
+                  const sectionLabel = section === "favorite" ? "Favorites" : section === "shared" ? "Shared" : "Private";
+                  const SectionIcon = section === "favorite" ? Star : section === "shared" ? Users : Lock;
+                  return (
+                    <div key={section}>
+                      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-900">
+                        <SectionIcon size={11} className="text-zinc-600 shrink-0" />
+                        <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">{sectionLabel}</span>
+                        <span className="ml-auto text-[10px] text-zinc-700">{items.length}</span>
+                      </div>
+                      {items.length === 0 ? (
+                        <p className="px-3 py-2 text-[11px] text-zinc-700 italic">None</p>
+                      ) : (
+                        <ul>
+                          {items.map((q) => (
+                            <li key={q.id} className="group border-b border-zinc-900/50">
+                              {renamingId === q.id ? (
+                                <div className="flex items-center gap-1 px-2 py-1.5">
+                                  <input
+                                    autoFocus
+                                    className="flex-1 bg-zinc-800 text-zinc-200 text-xs px-2 py-1 rounded focus:outline-none"
+                                    value={renameValue}
+                                    onChange={(e) => setRenameValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") renameQuery(q.id, renameValue);
+                                      if (e.key === "Escape") setRenamingId(null);
+                                    }}
+                                  />
+                                  <button onClick={() => renameQuery(q.id, renameValue)} className="cursor-pointer p-1 text-green-400 hover:text-green-300">
+                                    <Check size={11} />
+                                  </button>
+                                  <button onClick={() => setRenamingId(null)} className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-300">
+                                    <X size={11} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setSqlQuery(q.sql)}
+                                  className="cursor-pointer w-full text-left px-3 py-2 hover:bg-zinc-800/60 transition-colors"
+                                >
+                                  <div className="text-[11px] text-zinc-300 truncate">
+                                    {q.name ?? q.sql.replace(/\s+/g, " ").slice(0, 60)}
+                                  </div>
+                                  <div className="text-[10px] text-zinc-600 mt-0.5">
+                                    {new Date(q.executedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                  </div>
+                                  {/* action row — shown on hover */}
+                                  <div className="hidden group-hover:flex items-center gap-1 mt-1">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); updateQueryVisibility(q.id, "favorite"); }}
+                                      title="Favorite"
+                                      className={`cursor-pointer p-0.5 rounded transition-colors ${q.visibility === "favorite" ? "text-yellow-400" : "text-zinc-600 hover:text-yellow-400"}`}
+                                    >
+                                      <Star size={10} />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); updateQueryVisibility(q.id, q.visibility === "shared" ? "private" : "shared"); }}
+                                      title={q.visibility === "shared" ? "Make private" : "Share"}
+                                      className={`cursor-pointer p-0.5 rounded transition-colors ${q.visibility === "shared" ? "text-blue-400" : "text-zinc-600 hover:text-blue-400"}`}
+                                    >
+                                      <Users size={10} />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setRenamingId(q.id); setRenameValue(q.name ?? ""); }}
+                                      title="Rename"
+                                      className="cursor-pointer p-0.5 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+                                    >
+                                      <Pencil size={10} />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); deleteQuery(q.id); }}
+                                      title="Delete"
+                                      className="cursor-pointer p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors ml-auto"
+                                    >
+                                      <Trash2 size={10} />
+                                    </button>
+                                  </div>
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Editor + Results ── */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Editor area */}
+              <div className="flex flex-col" style={{ height: "50%" }}>
+                <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">SQL Query</span>
+                    <span className="text-xs text-zinc-600 font-mono bg-zinc-900 px-2 py-0.5 rounded">
+                      schema: proj_{projectId.replace(/-/g, "")}
+                    </span>
+                  </div>
+                  <button
+                    onClick={runSql}
+                    disabled={sqlRunning || !sqlQuery.trim()}
+                    className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors"
+                  >
+                    {sqlRunning ? <RefreshCw size={12} className="animate-spin" /> : <ExternalLink size={12} />}
+                    {sqlRunning ? "Running…" : "Run"}
+                  </button>
+                </div>
+                <textarea
+                  className="flex-1 w-full bg-zinc-950 text-zinc-100 text-sm font-mono px-4 py-3 resize-none focus:outline-none placeholder-zinc-700"
+                  placeholder={"-- All queries run in your project schema automatically.\n-- Use table names directly, e.g.:\nSELECT * FROM dating_profiles LIMIT 10;\nCREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT);"}
+                  value={sqlQuery}
+                  onChange={(e) => setSqlQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                      e.preventDefault();
+                      runSql();
+                    }
+                  }}
+                  spellCheck={false}
+                />
+              </div>
+
+              {/* Results area */}
+              <div className="flex-1 flex flex-col border-t border-zinc-800 overflow-hidden">
+                <div className="px-4 py-2 border-b border-zinc-800 shrink-0 flex items-center gap-2">
+                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Results</span>
+                  {sqlResult && (
+                    <span className="text-xs text-zinc-500">
+                      {sqlResult.rowCount ?? sqlResult.rows.length} row{(sqlResult.rowCount ?? sqlResult.rows.length) !== 1 ? "s" : ""}
+                      {" · "}
+                      {sqlResult.command}
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 overflow-auto">
+                  {sqlError ? (
+                    <div className="px-4 py-3 text-xs text-red-400 font-mono whitespace-pre-wrap">{sqlError}</div>
+                  ) : !sqlResult ? (
+                    <div className="h-full flex items-center justify-center text-zinc-700 text-sm">
+                      Run a query to see results
+                    </div>
+                  ) : sqlResult.rows.length === 0 ? (
+                    <div className="px-4 py-3 text-xs text-zinc-500">
+                      {sqlResult.command === "SELECT" ? "Query returned 0 rows." : `${sqlResult.command} executed successfully.`}
+                    </div>
+                  ) : (
+                    <table className="w-full text-xs font-mono border-collapse">
+                      <thead>
+                        <tr className="border-b border-zinc-800 sticky top-0 bg-zinc-950">
+                          {sqlResult.fields.map((f) => (
+                            <th key={f.name} className="px-4 py-2 text-left text-zinc-400 font-semibold whitespace-nowrap border-r border-zinc-800 last:border-r-0">
+                              {f.name}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sqlResult.rows.map((row, i) => (
+                          <tr key={i} className="border-b border-zinc-900 hover:bg-zinc-900/50">
+                            {sqlResult!.fields.map((f) => (
+                              <td key={f.name} className="px-4 py-1.5 text-zinc-300 whitespace-nowrap border-r border-zinc-900 last:border-r-0 max-w-xs truncate">
+                                {row[f.name] === null ? (
+                                  <span className="text-zinc-600 italic">null</span>
+                                ) : typeof row[f.name] === "object" ? (
+                                  JSON.stringify(row[f.name])
+                                ) : (
+                                  String(row[f.name])
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── RLS Policies Tab ── */}
         {tab === "rls" && (
           <div className="flex h-full overflow-hidden">
@@ -1722,6 +2054,7 @@ with check (
           </div>
         </>
       )}
+
     </div>
   );
 }

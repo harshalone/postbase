@@ -59,7 +59,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     return Response.json({ user: formatUser(user) });
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
@@ -106,6 +105,5 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pr
     return Response.json({ user: formatUser(user) });
   } finally {
     client.release();
-    await pool.end();
   }
 }

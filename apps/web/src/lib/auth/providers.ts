@@ -27,6 +27,7 @@ export const OAUTH_PROVIDERS = [
   { id: "keycloak", name: "Keycloak", category: "enterprise" },
   { id: "credentials", name: "Email + Password", category: "credentials" },
   { id: "email", name: "Magic Link", category: "credentials" },
+  { id: "email-otp", name: "Email OTP", category: "credentials" },
   { id: "phone", name: "Phone / SMS OTP", category: "credentials" },
   { id: "passkey", name: "Passkey (WebAuthn)", category: "credentials" },
   { id: "anonymous", name: "Anonymous / Guest", category: "credentials" },

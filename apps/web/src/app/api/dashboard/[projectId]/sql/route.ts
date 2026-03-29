@@ -24,19 +24,23 @@ export async function POST(
   const client = await pool.connect();
   try {
     const schema = await ensureProjectSchema(client, projectId);
-    // Set search_path so unqualified table names resolve to project schema
+    // Wrap in a transaction so SET LOCAL search_path is scoped to this query only.
+    // This prevents the search_path from leaking to other requests on the same connection.
+    await client.query("BEGIN");
     await client.query(`SET LOCAL search_path TO "${schema}", public`);
     const result = await client.query(sql);
+    await client.query("COMMIT");
     return NextResponse.json({
       rows: result.rows,
       fields: result.fields?.map((f) => ({ name: f.name })) ?? [],
       rowCount: result.rowCount,
       command: result.command,
+      schema,
     });
   } catch (err) {
+    try { await client.query("ROLLBACK"); } catch { /* ignore */ }
     return NextResponse.json({ error: String(err) }, { status: 400 });
   } finally {
     client.release();
-    await pool.end();
   }
 }

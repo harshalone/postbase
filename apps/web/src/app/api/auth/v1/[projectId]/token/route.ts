@@ -161,6 +161,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     });
   } finally {
     client.release();
-    await pool.end();
   }
 }

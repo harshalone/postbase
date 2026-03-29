@@ -90,6 +90,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     return response;
   } finally {
     client.release();
-    await pool.end();
   }
 }

@@ -55,6 +55,5 @@ export async function DELETE(
     return Response.json({ error: String(err) }, { status: 500 });
   } finally {
     client.release();
-    await pool.end();
   }
 }

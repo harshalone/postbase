@@ -32,7 +32,6 @@ export default async function ProjectOverviewPage({
       sessionCount = s.rows[0]?.c ?? 0;
     } finally {
       client.release();
-      await pool.end();
     }
   }
 

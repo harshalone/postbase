@@ -36,6 +36,13 @@
       "when": 1774900000000,
       "tag": "0004_add_from_name",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1743206400000,
+      "tag": "0005_sql_query_history",
+      "breakpoints": true
     }
   ]
 }

@@ -23,7 +23,7 @@ const NAV_ITEMS = [
   { label: "Overview",      icon: LayoutDashboard, suffix: ""              },
   { label: "Auth Providers",icon: Shield,           suffix: "/auth"         },
   { label: "Users",         icon: Users,            suffix: "/users"        },
-  { label: "Database",      icon: Database,         suffix: "/database"     },
+  { label: "Tables",        icon: Database,         suffix: "/database"     },
   { label: "SQL Editor",    icon: Terminal,         suffix: "/sql"          },
   { label: "Storage",       icon: HardDrive,        suffix: "/storage"      },
   { label: "Integrations",  icon: Puzzle,           suffix: "/integrations" },

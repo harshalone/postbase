@@ -1,7 +1,62 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Server, Cloud, CheckCircle2, Loader2, Upload, KeyRound, FlaskConical } from "lucide-react";
+import { Server, Cloud, CheckCircle2, Loader2, Upload, KeyRound, FlaskConical, Eye, EyeOff, Copy, Check } from "lucide-react";
+
+// ─── Secret input with reveal + copy ─────────────────────────────────────────
+
+function SecretInput({
+  value,
+  onChange,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    if (!value) return;
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type={visible ? "text" : "password"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`${className ?? ""} pr-16`}
+      />
+      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          className="cursor-pointer text-zinc-600 hover:text-zinc-300 transition-colors"
+          title={visible ? "Hide" : "Reveal"}
+        >
+          {visible ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="cursor-pointer text-zinc-600 hover:text-zinc-300 transition-colors"
+          title="Copy"
+        >
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+        </button>
+      </div>
+    </div>
+  );
+}
 import { TestEmailPanel } from "./test-email-panel";
 
 type EmailProvider = "smtp" | "ses";
@@ -97,8 +152,9 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     fetch(`/api/dashboard/email-settings?projectId=${projectId}`)
-      .then((r) => r.json())
-      .then(({ settings: s }) => {
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const s = data?.settings;
         if (s) {
           setSettings({
             provider: s.provider ?? "smtp",
@@ -265,10 +321,9 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
               </div>
               <div>
                 <label className="block text-xs text-zinc-500 mb-1.5">Password</label>
-                <input
-                  type="password"
+                <SecretInput
                   value={settings.smtpPassword}
-                  onChange={(e) => set("smtpPassword", e.target.value)}
+                  onChange={(v) => set("smtpPassword", v)}
                   placeholder="••••••••"
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
                 />
@@ -393,10 +448,9 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
                 </div>
                 <div>
                   <label className="block text-xs text-zinc-500 mb-1.5">Secret Access Key</label>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={settings.sesSecretAccessKey}
-                    onChange={(e) => set("sesSecretAccessKey", e.target.value)}
+                    onChange={(v) => set("sesSecretAccessKey", v)}
                     placeholder="••••••••••••••••••••••••••••••••••••••••"
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
                   />
@@ -460,10 +514,9 @@ export function EmailSettingsForm({ projectId }: { projectId: string }) {
                 </div>
                 <div>
                   <label className="block text-xs text-zinc-500 mb-1.5">SMTP Password</label>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={settings.sesSmtpPassword}
-                    onChange={(e) => set("sesSmtpPassword", e.target.value)}
+                    onChange={(v) => set("sesSmtpPassword", v)}
                     placeholder="••••••••••••••••••••••••••••••••••••••••"
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 placeholder:text-zinc-600"
                   />

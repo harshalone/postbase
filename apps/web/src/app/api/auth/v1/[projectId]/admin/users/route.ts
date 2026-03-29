@@ -58,7 +58,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     return Response.json({ users: rows.map(formatUser), total });
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
@@ -110,6 +109,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     return Response.json({ user: formatUser(user) }, { status: 201 });
   } finally {
     client.release();
-    await pool.end();
   }
 }

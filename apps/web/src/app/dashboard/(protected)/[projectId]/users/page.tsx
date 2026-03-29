@@ -79,7 +79,6 @@ export default async function UsersPage({
         }));
     } finally {
       client.release();
-      await pool.end();
     }
   }
 

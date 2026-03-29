@@ -214,6 +214,28 @@ export const adminUsers = postbaseSchema.table("admin_users", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// ─── SQL query history ────────────────────────────────────────────────────────
+
+export const sqlQueries = postbaseSchema.table(
+  "sql_queries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    sql: text("sql").notNull(),
+    name: text("name"), // user-given label (optional)
+    visibility: text("visibility").notNull().default("private"), // 'private' | 'shared' | 'favorite'
+    executedAt: timestamp("executed_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    projectIdx: index("sql_queries_project_idx").on(t.projectId),
+    executedAtIdx: index("sql_queries_executed_at_idx").on(t.executedAt),
+  })
+);
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const organisationsRelations = relations(organisations, ({ many }) => ({

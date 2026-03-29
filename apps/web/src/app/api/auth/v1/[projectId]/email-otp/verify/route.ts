@@ -1,14 +1,11 @@
 /**
- * POST /api/auth/v1/[projectId]/signup
+ * POST /api/auth/v1/[projectId]/email-otp/verify
  *
- * Sign up a new user with email + password.
+ * Verify a 6-digit email OTP code and return session tokens.
  * Requires: Authorization: Bearer <anon-key>
- *
- * Body: { email, password, data?: Record<string,unknown> }
- * Returns: { user, session }
+ * Body: { email, code }
  */
 import { NextRequest } from "next/server";
-import { hash } from "bcryptjs";
 import { z } from "zod";
 import { validateApiKey } from "@/lib/auth/keys";
 import { signJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";
@@ -17,8 +14,7 @@ import { nanoid } from "nanoid";
 
 const bodySchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
-  data: z.record(z.unknown()).optional(),
+  code: z.string().length(6),
 });
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
@@ -37,10 +33,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   }
 
   const parsed = bodySchema.safeParse(body);
-  if (!parsed.success) {
-    return Response.json({ error: parsed.error.flatten() }, { status: 400 });
-  }
-  const { email, password, data: metadata } = parsed.data;
+  if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 });
+
+  const { email, code } = parsed.data;
 
   const schema = getProjectSchema(keyInfo.projectId);
   const pool = getProjectPool();
@@ -48,22 +43,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   try {
     await ensureProjectAuthTables(client, schema);
 
-    const { rows: [existing] } = await client.query(
-      `SELECT id FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,
-      [email]
+    const now = new Date();
+    const { rows: [vt] } = await client.query(
+      `SELECT * FROM "${schema}"."verification_tokens"
+       WHERE "identifier" = $1 AND "token" = $2 AND "expires" > $3
+       LIMIT 1`,
+      [email, code, now]
     );
-    if (existing) {
-      return Response.json({ error: "User already registered" }, { status: 422 });
-    }
 
-    const passwordHash = await hash(password, 12);
+    if (!vt) return Response.json({ error: "Invalid or expired code" }, { status: 400 });
+
+    await client.query(
+      `DELETE FROM "${schema}"."verification_tokens" WHERE "identifier" = $1 AND "token" = $2`,
+      [email, code]
+    );
 
     const { rows: [user] } = await client.query(
-      `INSERT INTO "${schema}"."users" ("email", "password_hash", "metadata")
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [email, passwordHash, JSON.stringify(metadata ?? {})]
+      `SELECT * FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,
+      [email]
     );
+    if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+
+    if (!user.email_verified) {
+      await client.query(
+        `UPDATE "${schema}"."users" SET "email_verified" = $1 WHERE "id" = $2`,
+        [now, user.id]
+      );
+    }
 
     const secret = getJwtSecret();
     const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
@@ -85,19 +91,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
     );
 
-    const userOut = {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      image: user.image,
-      emailVerified: !!user.email_verified,
-      metadata: user.metadata,
-      createdAt: user.created_at,
-    };
-
     return Response.json({
-      user: userOut,
-      session: { accessToken, refreshToken, expiresAt, user: userOut },
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: "bearer",
+      expires_in: ACCESS_TOKEN_TTL,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        email_verified: user.email_verified,
+      },
     });
   } finally {
     client.release();

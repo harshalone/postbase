@@ -14,6 +14,7 @@ import { NextRequest } from "next/server";
 import { pool } from "@/lib/db";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
+import { getProjectSchema } from "@/lib/project-db";
 import { z } from "zod";
 
 const filterOperators = z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "in", "is", "contains", "overlaps", "textSearch"]);
@@ -198,6 +199,10 @@ export async function POST(req: NextRequest) {
     const values: unknown[] = [];
     let sql = "";
 
+    // Set search_path to project schema so bare table names resolve correctly
+    const schema = getProjectSchema(keyInfo.projectId);
+    await client.query(`SET search_path TO "${schema}", public`);
+
     // Set RLS context
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
     await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
@@ -222,7 +227,10 @@ export async function POST(req: NextRequest) {
           return Response.json({ data: null, count: parseInt(result.rows[0].count, 10) });
         }
 
-        const cols = input.columns?.map((c) => `"${sanitizeIdentifier(c)}"`).join(", ") ?? "*";
+        const cols = input.columns
+          ?.flatMap((c) => c.split(",").map((s) => s.trim()).filter(Boolean))
+          .map((c) => `"${sanitizeIdentifier(c)}"`)
+          .join(", ") ?? "*";
         const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
 
         if (input.count === "exact") {
@@ -315,8 +323,10 @@ export async function POST(req: NextRequest) {
     return Response.json({ data: result.rows, count: result.rowCount });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Query failed";
+    console.error("[db/query] ERROR:", message, "| table:", input.table, "| operation:", input.operation, "| schema:", getProjectSchema(keyInfo.projectId), "| columns:", JSON.stringify("columns" in input ? input.columns : null), "| filters:", JSON.stringify("filters" in input ? input.filters : null));
     return Response.json({ error: message }, { status: 400 });
   } finally {
+    await client.query('RESET search_path').catch(() => {});
     client.release();
   }
 }

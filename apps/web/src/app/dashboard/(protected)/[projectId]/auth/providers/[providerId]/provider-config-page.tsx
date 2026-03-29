@@ -142,6 +142,10 @@ const PROVIDER_META: Record<
     ],
   },
   // email (Magic Link) is handled separately below
+  "email-otp": {
+    description: "Send a 6-digit one-time password to the user's email. Uses your project email settings and the OTP template.",
+    fields: [],
+  },
   phone: {
     description: "Send one-time passwords via SMS. Requires a Twilio account.",
     docsUrl: "https://console.twilio.com/",
@@ -434,6 +438,7 @@ export function ProviderConfigPage({ provider, projectId, existing }: Props) {
   const meta = PROVIDER_META[provider.id] ?? { fields: [] };
   const needsOAuthCreds = OAUTH_CREDENTIAL_PROVIDERS.includes(provider.id);
   const isMagicLink = provider.id === "email";
+  const isEmailOtp = provider.id === "email-otp";
 
   const [enabled, setEnabled] = useState(existing?.enabled ?? false);
   const [clientId, setClientId] = useState(existing?.clientId ?? "");
@@ -566,8 +571,32 @@ export function ProviderConfigPage({ provider, projectId, existing }: Props) {
           />
         )}
 
-        {/* Provider-specific extra fields (non-magic-link) */}
-        {!isMagicLink && meta.fields.length > 0 && (
+        {/* Email OTP: informational note */}
+        {isEmailOtp && (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2">
+            <p className="text-sm text-zinc-300 font-medium">Email delivery</p>
+            <p className="text-xs text-zinc-500">
+              OTP codes are sent using your project&apos;s email settings (SMTP or AWS SES). Configure delivery in the{" "}
+              <Link
+                href={`/dashboard/${projectId}/auth/email`}
+                className="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              >
+                Email Settings
+              </Link>{" "}
+              tab, and customise the email body in the{" "}
+              <Link
+                href={`/dashboard/${projectId}/auth/templates`}
+                className="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              >
+                Templates
+              </Link>{" "}
+              tab under <strong className="text-zinc-400">6-Digit OTP</strong>.
+            </p>
+          </div>
+        )}
+
+        {/* Provider-specific extra fields (non-magic-link, non-email-otp) */}
+        {!isMagicLink && !isEmailOtp && meta.fields.length > 0 && (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 space-y-4">
             <h2 className="text-sm font-medium text-zinc-300">
               {provider.id === "phone" ? "SMS Configuration" : "Additional Settings"}
@@ -586,7 +615,7 @@ export function ProviderConfigPage({ provider, projectId, existing }: Props) {
         )}
 
         {/* No-config providers */}
-        {!needsOAuthCreds && !isMagicLink && meta.fields.length === 0 &&
+        {!needsOAuthCreds && !isMagicLink && !isEmailOtp && meta.fields.length === 0 &&
           !["credentials"].includes(provider.id) && (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
             <p className="text-sm text-zinc-500">No additional configuration required.</p>

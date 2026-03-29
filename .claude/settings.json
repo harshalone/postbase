@@ -78,7 +78,27 @@
       "Bash(ls /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/storage/page.tsx)",
       "Bash(wc -l /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/storage/page.tsx)",
       "Bash(head -10 /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)",
-      "Bash(head -10 /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/integrations/page.tsx)"
+      "Bash(head -10 /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/integrations/page.tsx)",
+      "Bash(find \"/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\(protected\\)\" -type f -name \"*.tsx\")",
+      "Bash(grep -n \"newTablePanel.visible\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)",
+      "Bash(grep -n \"slide-panel-backdrop\\\\|slide-panel \" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)",
+      "Bash(grep -n \"smtpFrom\\\\|sesFrom\\\\|smtpUser\\\\|from:\" /Volumes/2TB/code/postbase.com/apps/web/src/app/api/auth/v1/*/otp/route.ts /Volumes/2TB/code/postbase.com/apps/web/src/app/api/auth/v1/*/magic-link/route.ts)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(grep -n \"TABLES\\\\|table_name\\\\|setSelectedTable\\\\|tablesLoading\\\\|tables.map\\\\|sidebar\\\\|left panel\\\\|table list\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)",
+      "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/storage -type f -o -type d)",
+      "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src/components -type f \\\\\\(-name *storage* -o -name *file* -o -name *bucket* \\\\\\))",
+      "Bash(ls '/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\(protected\\)/[projectId]/storage/')",
+      "Bash(npx --yes tsc --noEmit)",
+      "Bash(node_modules/.bin/tsc --project apps/web/tsconfig.json --noEmit)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(git diff:*)",
+      "Bash(ls apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/auth/email/test-email-panel.tsx)",
+      "Bash(pnpm db:migrate)",
+      "Bash(grep -n \"sql.*tab\\\\|{tab === \"\"sql\"\"\\\\|SQL Editor\\\\|sqlHistory\\\\|historyLoading\\\\|renamingId\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/page.tsx)",
+      "Bash(ls /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/sql/)",
+      "Bash(grep -n \"SavedQuery\\\\|savedQueries\\\\|saveToDisk\\\\|loadSaved\\\\|toggleFavorite\\\\|loadQuery\\\\b\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/sql/page.tsx)",
+      "Bash(grep -n \"Heart\\\\|saveQuery\\\\|saveModal\\\\|saveName\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/sql/page.tsx)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
@@ -87,7 +107,14 @@
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/[projectId]",
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]",
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/auth/v1/[projectId]",
-      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/[projectId]/user-columns"
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/[projectId]/user-columns",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]/storage/[connectionId]",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/storage",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/auth/v1/[projectId]/email-otp",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]/sql",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]/sql/history",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/sql",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/database/import"
     ]
   }
 }

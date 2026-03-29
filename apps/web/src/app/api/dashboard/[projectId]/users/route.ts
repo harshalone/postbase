@@ -57,6 +57,5 @@ export async function GET(
     return Response.json({ users, total, page, perPage });
   } finally {
     client.release();
-    await pool.end();
   }
 }

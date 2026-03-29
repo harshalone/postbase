@@ -55,7 +55,6 @@ export async function GET(
     return Response.json({ user: formatUser(user) });
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
@@ -108,7 +107,6 @@ export async function PATCH(
     return Response.json({ user: formatUser(user) });
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
@@ -136,6 +134,5 @@ export async function DELETE(
     return Response.json({ message: "User deleted" });
   } finally {
     client.release();
-    await pool.end();
   }
 }
