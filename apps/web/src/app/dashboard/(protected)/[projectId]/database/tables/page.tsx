@@ -194,6 +194,9 @@ export default function DatabasePage({
   const [insertColLoading, setInsertColLoading] = useState(false);
   const [createMoreCol, setCreateMoreCol] = useState(false);
 
+  // Selection state
+  const [selectedRows, setSelectedRows] = useState<Set<string | number>>(new Set());
+
 
   // SQL editor state
   const [sqlQuery, setSqlQuery] = useState("");
@@ -312,7 +315,64 @@ export default function DatabasePage({
 
   function handleSelectTable(name: string) {
     setSelectedTable(name);
+    setSelectedRows(new Set());
     fetchTableRows(name, 0);
+  }
+
+  function toggleRow(id: string | number) {
+    setSelectedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    const colHeaders = tableRows.length > 0 ? Object.keys(tableRows[0]) : [];
+    const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
+    if (!pkCol) return;
+
+    if (selectedRows.size === tableRows.length && tableRows.length > 0) {
+      setSelectedRows(new Set());
+    } else {
+      const next = new Set<string | number>();
+      tableRows.forEach((row) => {
+        const val = row[pkCol] as string | number;
+        if (val !== undefined && val !== null) next.add(val);
+      });
+      setSelectedRows(next);
+    }
+  }
+
+  async function bulkDelete() {
+    if (selectedRows.size === 0 || !selectedTable) return;
+    const colHeaders = tableRows.length > 0 ? Object.keys(tableRows[0]) : [];
+    const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
+    if (!pkCol) return;
+
+    if (!confirm(`Delete ${selectedRows.size} selected rows?`)) return;
+
+    const ids = Array.from(selectedRows).map(id => typeof id === 'string' ? `'${id}'` : id).join(', ');
+    const sql = `DELETE FROM "${selectedTable}" WHERE "${pkCol}" IN (${ids})`;
+
+    try {
+      const res = await fetch(`/api/dashboard/${projectId}/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast.error(data.error);
+      } else {
+        toast.success(`Deleted ${selectedRows.size} rows`);
+        setSelectedRows(new Set());
+        fetchTableRows(selectedTable, tableOffset);
+      }
+    } catch (err) {
+      toast.error(String(err));
+    }
   }
 
   // ─── Insert row ─────────────────────────────────────────────────────────────
@@ -694,6 +754,31 @@ export default function DatabasePage({
                         {(selectedTableMeta?.columns.length ?? 0) > 3 ? "…" : ""} or ask AI
                       </span>
                     </div>
+
+                    {/* Bulk Actions */}
+                    {selectedRows.size > 0 && (
+                      <div className="flex items-center gap-3 px-2 py-1 bg-brand-500/10 border border-brand-500/20 rounded-md animate-in fade-in slide-in-from-left-2">
+                        <div className="flex items-center gap-2 px-1.5 border-r border-brand-500/20 mr-0.5">
+                           <span className="text-xs font-bold text-brand-400">{selectedRows.size}</span>
+                           <span className="text-[10px] font-bold text-brand-500 uppercase tracking-tight">Selected</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={bulkDelete}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-red-400/10 text-xs font-bold text-red-500 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 size={12} />
+                            Delete
+                          </button>
+                          <button 
+                            onClick={() => setSelectedRows(new Set())}
+                            className="px-2 py-1 rounded hover:bg-zinc-800 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <button className="cursor-pointer flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-zinc-400 border border-zinc-800 hover:border-zinc-700 hover:text-zinc-200 transition-colors bg-zinc-900">
                       <ArrowUpDown size={11} />
                       Sort
@@ -814,7 +899,16 @@ export default function DatabasePage({
                       <table className="w-full text-xs border-collapse">
                         <thead className="sticky top-0 bg-zinc-950 z-10">
                           <tr className="border-b border-zinc-800">
-                            <th className="w-10 px-3 py-2.5 border-r border-zinc-800 bg-zinc-950 text-zinc-700 font-normal select-none">#</th>
+                            <th className="w-10 px-3 py-2.5 border-r border-zinc-800 bg-zinc-950 text-zinc-700 font-normal select-none">
+                              <div className="flex items-center justify-center">
+                                <input
+                                  type="checkbox"
+                                  checked={tableRows.length > 0 && selectedRows.size === tableRows.length}
+                                  onChange={toggleAll}
+                                  className="cursor-pointer w-3.5 h-3.5 accent-brand-500 rounded border-zinc-700 bg-zinc-900"
+                                />
+                              </div>
+                            </th>
                             {selectedTableMeta?.columns.map((col) => (
                               <th
                                 key={col.column_name}
@@ -838,11 +932,23 @@ export default function DatabasePage({
                             <tr>
                               <td colSpan={99} className="px-4 py-12 text-center text-zinc-600">No rows in this table</td>
                             </tr>
-                          ) : tableRows.map((row, i) => (
-                            <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-800/20 group">
-                              <td className="px-3 py-2 text-zinc-700 border-r border-zinc-800 text-center font-mono select-none">
-                                {tableOffset + i + 1}
-                              </td>
+                          ) : tableRows.map((row, i) => {
+                            const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
+                            const rowId = pkCol ? (row[pkCol] as string | number) : i;
+                            const isSelected = selectedRows.has(rowId);
+
+                            return (
+                              <tr key={i} className={`border-b border-zinc-800/50 hover:bg-zinc-800/20 group ${isSelected ? "bg-brand-500/5 hover:bg-brand-500/10" : ""}`}>
+                                <td className="px-3 py-2 text-zinc-700 border-r border-zinc-800 text-center font-mono select-none">
+                                  <div className="flex items-center justify-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleRow(rowId)}
+                                      className="cursor-pointer w-3.5 h-3.5 accent-brand-500 rounded border-zinc-700 bg-zinc-900"
+                                    />
+                                  </div>
+                                </td>
                               {selectedTableMeta?.columns.map((col) => (
                                 <td
                                   key={col.column_name}
@@ -877,8 +983,9 @@ export default function DatabasePage({
                                 </button>
                               </td>
                             </tr>
-                          ))}
-                        </tbody>
+                          );
+                        })}
+                      </tbody>
                       </table>
                     </div>
                   )}
