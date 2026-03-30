@@ -47,6 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const client = await pool.connect();
   try {
     await ensureProjectAuthTables(client, schema);
+    await client.query(`SET search_path TO "${schema}", public`);
 
     const { rows: [existing] } = await client.query(
       `SELECT id FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,

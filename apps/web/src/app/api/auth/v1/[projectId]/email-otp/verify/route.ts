@@ -42,6 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const client = await pool.connect();
   try {
     await ensureProjectAuthTables(client, schema);
+    await client.query(`SET search_path TO "${schema}", public`);
 
     const now = new Date();
     const { rows: [vt] } = await client.query(

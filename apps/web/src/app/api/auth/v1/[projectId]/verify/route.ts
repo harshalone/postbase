@@ -27,6 +27,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
   const client = await pool.connect();
   try {
     await ensureProjectAuthTables(client, schema);
+    await client.query(`SET search_path TO "${schema}", public`);
 
     const now = new Date();
     const { rows: [vt] } = await client.query(
@@ -88,6 +89,95 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
 
     response.headers.set("Set-Cookie", cookieOpts);
     return response;
+  } finally {
+    client.release();
+  }
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const { email, token, type } = body;
+  // type can be 'signup', 'magiclink', 'recovery', 'invite', 'email_change', 'email'
+  
+  if (!email || !token) {
+    return Response.json({ error: "Missing email or token" }, { status: 400 });
+  }
+
+  const schema = getProjectSchema(projectId);
+  const pool = getProjectPool();
+  const client = await pool.connect();
+  try {
+    await ensureProjectAuthTables(client, schema);
+    await client.query(`SET search_path TO "${schema}", public`);
+
+    const now = new Date();
+    const { rows: [vt] } = await client.query(
+      `SELECT * FROM "${schema}"."verification_tokens"
+       WHERE "identifier" = $1 AND "token" = $2 AND "expires" > $3
+       LIMIT 1`,
+      [email, token, now]
+    );
+
+    if (!vt) return Response.json({ error: "Invalid or expired token" }, { status: 400 });
+
+    await client.query(
+      `DELETE FROM "${schema}"."verification_tokens" WHERE "identifier" = $1 AND "token" = $2`,
+      [email, token]
+    );
+
+    const { rows: [user] } = await client.query(
+      `SELECT * FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,
+      [email]
+    );
+    if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+
+    if (!user.email_verified) {
+      await client.query(
+        `UPDATE "${schema}"."users" SET "email_verified" = $1 WHERE "id" = $2`,
+        [now, user.id]
+      );
+    }
+
+    const secret = getJwtSecret();
+    const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
+    const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
+
+    const accessToken = await signJwt(
+      { sub: user.id, pid: projectId, email: user.email, exp: expiresAt },
+      secret
+    );
+    const refreshToken = await signJwt(
+      { sub: user.id, pid: projectId, email: user.email, exp: refreshExpiresAt, jti: nanoid() },
+      secret
+    );
+
+    await client.query(
+      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires")
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING`,
+      [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
+    );
+
+    return Response.json({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_in: ACCESS_TOKEN_TTL,
+      token_type: "bearer",
+      user: {
+        id: user.id,
+        email: user.email,
+        email_verified: !!user.email_verified,
+        metadata: user.metadata,
+      }
+    });
   } finally {
     client.release();
   }

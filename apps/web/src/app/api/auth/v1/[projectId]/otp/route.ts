@@ -8,7 +8,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { emailSettings, emailTemplates } from "@/lib/db/schema";
+import { emailSettings, emailTemplates, providerConfigs } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
@@ -19,7 +19,12 @@ import type SMTPTransport from "nodemailer/lib/smtp-transport";
 const bodySchema = z.object({
   email: z.string().email(),
   redirectTo: z.string().url().optional(),
+  type: z.enum(["magic_link", "otp"]).optional(),
 });
+
+function generateOtp(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
@@ -39,13 +44,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { email, redirectTo } = parsed.data;
+  const { email, redirectTo, type: requestedType } = parsed.data;
+
+  // Check which providers are enabled for this project
+  const configs = await db
+    .select()
+    .from(providerConfigs)
+    .where(eq(providerConfigs.projectId, keyInfo.projectId));
+  
+  const isEmailEnabled = configs.find(c => c.provider === "email")?.enabled ?? false;
+  const isEmailOtpEnabled = configs.find(c => c.provider === "email-otp")?.enabled ?? false;
+
+  // Determine the type to send
+  let type: "magic_link" | "otp" = requestedType || "magic_link";
+  
+  // If no type requested, and magic link is disabled but OTP is enabled, default to OTP
+  if (!requestedType && !isEmailEnabled && isEmailOtpEnabled) {
+    type = "otp";
+  }
+
+  if (type === "magic_link" && !isEmailEnabled && requestedType) {
+    return Response.json({ error: "Magic link provider is not enabled" }, { status: 403 });
+  }
+  if (type === "otp" && !isEmailOtpEnabled && requestedType) {
+    return Response.json({ error: "Email OTP provider is not enabled" }, { status: 403 });
+  }
 
   const schema = getProjectSchema(keyInfo.projectId);
   const pool = getProjectPool();
   const client = await pool.connect();
   try {
     await ensureProjectAuthTables(client, schema);
+    await client.query(`SET search_path TO "${schema}", public`);
 
     // Upsert user — create if not exists
     const { rows: [existing] } = await client.query(
@@ -59,8 +89,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       );
     }
 
-    const token = nanoid(64);
-    const expires = new Date(Date.now() + 60 * 60 * 1000);
+    const isOtp = type === "otp";
+    const token = isOtp ? generateOtp() : nanoid(64);
+    const expires = new Date(Date.now() + (isOtp ? 10 : 60) * 60 * 1000); // 10 mins for OTP, 60 mins for Magic Link
 
     // Delete any existing token for this email then insert new one
     await client.query(
@@ -90,7 +121,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
     if (!emailConfigured) {
       if (process.env.NODE_ENV === "development") {
-        return Response.json({ message: "OTP sent", _dev_magic_link: magicLink });
+        return Response.json({ message: "OTP sent", _dev_magic_link: isOtp ? null : magicLink, _dev_otp: isOtp ? token : null });
       }
       return Response.json({ error: "Email not configured for this project" }, { status: 500 });
     }
@@ -98,13 +129,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     const [template] = await db
       .select()
       .from(emailTemplates)
-      .where(and(eq(emailTemplates.projectId, keyInfo.projectId), eq(emailTemplates.type, "magic_link")))
+      .where(and(eq(emailTemplates.projectId, keyInfo.projectId), eq(emailTemplates.type, type)))
       .limit(1);
 
-    const subject = template?.subject ?? "Your magic link";
-    const htmlBody = template?.body
-      ? template.body.replace("{{magic_link}}", magicLink).replace("{{email}}", email)
-      : `<p>Click <a href="${magicLink}">here</a> to sign in.</p>`;
+    const subject = template?.subject ?? (isOtp ? "Your verification code" : "Your magic link");
+    let htmlBody = template?.body || "";
+
+    if (isOtp) {
+      htmlBody = htmlBody
+        ? htmlBody.replace(/\{\{code\}\}/g, token).replace(/\{\{email\}\}/g, email).replace(/\{\{expires_in\}\}/g, "10 minutes")
+        : `<p>Your verification code is: <strong>${token}</strong></p><p>This code expires in 10 minutes.</p>`;
+    } else {
+      htmlBody = htmlBody
+        ? htmlBody.replace("{{magic_link}}", magicLink).replace("{{email}}", email)
+        : `<p>Click <a href="${magicLink}">here</a> to sign in.</p>`;
+    }
 
     let transportConfig: SMTPTransport.Options;
 
