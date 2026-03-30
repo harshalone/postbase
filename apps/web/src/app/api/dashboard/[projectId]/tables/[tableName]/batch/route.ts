@@ -41,6 +41,7 @@ export async function POST(
       const vals = Object.values(row);
       const cols = keys.map((k) => `"${k}"`).join(", ");
       const placeholders = keys.map((_, j) => `$${j + 1}`).join(", ");
+      await client.query(`SAVEPOINT row_${i}`);
       try {
         await client.query(
           `INSERT INTO "${schema}"."${tableName}" (${cols}) VALUES (${placeholders})`,
@@ -48,6 +49,7 @@ export async function POST(
         );
         inserted++;
       } catch (err) {
+        await client.query(`ROLLBACK TO SAVEPOINT row_${i}`);
         errors.push(`Row ${i + 1}: ${String(err)}`);
       }
     }

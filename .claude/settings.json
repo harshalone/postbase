@@ -98,7 +98,8 @@
       "Bash(ls /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/sql/)",
       "Bash(grep -n \"SavedQuery\\\\|savedQueries\\\\|saveToDisk\\\\|loadSaved\\\\|toggleFavorite\\\\|loadQuery\\\\b\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/sql/page.tsx)",
       "Bash(grep -n \"Heart\\\\|saveQuery\\\\|saveModal\\\\|saveName\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/sql/page.tsx)",
-      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(find /Volumes/2TB/code/postbase.com -type f \\\\\\(-name *seed* -o -name *import* \\\\\\) ! -path */node_modules/* ! -path */.next/*)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
