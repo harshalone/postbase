@@ -422,8 +422,7 @@ export default function DatabasePage({
 
   // ─── SQL runner ─────────────────────────────────────────────────────────────
 
-  async function runSql() {
-    if (!sqlQuery.trim()) return;
+  async function executeSql(query: string) {
     setSqlRunning(true);
     setSqlError(null);
     setSqlResult(null);
@@ -431,7 +430,7 @@ export default function DatabasePage({
       const res = await fetch(`/api/dashboard/${projectId}/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: sqlQuery }),
+        body: JSON.stringify({ sql: query }),
       });
       const data = await res.json();
       if (data.error) {
@@ -445,7 +444,7 @@ export default function DatabasePage({
       const saveRes = await fetch(`/api/dashboard/${projectId}/sql/history`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: sqlQuery }),
+        body: JSON.stringify({ sql: query }),
       });
       const saveData = await saveRes.json();
       if (saveData.query) {
@@ -456,6 +455,25 @@ export default function DatabasePage({
     } finally {
       setSqlRunning(false);
     }
+  }
+
+  async function runSql() {
+    if (!sqlQuery.trim()) return;
+
+    const destructive = /truncate|delete|drop/i.test(sqlQuery);
+    if (destructive) {
+      const command = sqlQuery.trim().split(/\s+/)[0].toUpperCase();
+      setConfirmModal({
+        message: `You are about to run a destructive ${command} query. This action could result in permanent data loss. Are you 100% sure you want to proceed?`,
+        onConfirm: () => {
+          setConfirmModal(null);
+          executeSql(sqlQuery);
+        },
+      });
+      return;
+    }
+
+    executeSql(sqlQuery);
   }
 
   async function updateQueryVisibility(id: string, visibility: SqlQuery["visibility"]) {
