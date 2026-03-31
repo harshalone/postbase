@@ -90,17 +90,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
     );
 
+    const userOut = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      image: user.image,
+      emailVerified: !!user.email_verified,
+      metadata: user.metadata,
+      createdAt: user.created_at,
+    };
+
     return Response.json({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_type: "bearer",
-      expires_in: ACCESS_TOKEN_TTL,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        email_verified: user.email_verified,
-      },
+      user: userOut,
+      session: { accessToken, refreshToken, expiresAt, user: userOut },
     });
   } finally {
     client.release();

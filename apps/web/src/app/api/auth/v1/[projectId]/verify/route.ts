@@ -56,13 +56,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     );
 
     const secret = getJwtSecret();
-    const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
     const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
 
-    const accessToken = await signJwt(
-      { sub: user.id, pid: projectId, email: user.email, exp: expiresAt },
-      secret
-    );
     const refreshToken = await signJwt(
       { sub: user.id, pid: projectId, email: user.email, exp: refreshExpiresAt, jti: nanoid() },
       secret
@@ -102,8 +97,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { email, token, type } = body;
-  // type can be 'signup', 'magiclink', 'recovery', 'invite', 'email_change', 'email'
+  const { email, token } = body;
   
   if (!email || !token) {
     return Response.json({ error: "Missing email or token" }, { status: 400 });
@@ -162,17 +156,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
     );
 
+    const userOut = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      image: user.image,
+      emailVerified: !!user.email_verified,
+      metadata: user.metadata,
+      createdAt: user.created_at,
+    };
+
     return Response.json({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      expires_in: ACCESS_TOKEN_TTL,
-      token_type: "bearer",
-      user: {
-        id: user.id,
-        email: user.email,
-        email_verified: !!user.email_verified,
-        metadata: user.metadata,
-      }
+      user: userOut,
+      session: { accessToken, refreshToken, expiresAt, user: userOut },
     });
   } finally {
     client.release();

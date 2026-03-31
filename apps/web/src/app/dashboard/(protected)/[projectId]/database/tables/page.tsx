@@ -33,6 +33,7 @@ import {
   MoreHorizontal,
   Check,
   Copy,
+  AlertTriangle,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ type Column = {
   data_type: string;
   is_nullable: string;
   column_default: string | null;
+  is_primary_key?: boolean;
 };
 
 type TableMeta = {
@@ -782,7 +784,9 @@ export default function DatabasePage({
 
   const selectedTableMeta = tables.find((t) => t.table_name === selectedTable);
   const colHeaders = selectedTableMeta?.columns.map((c) => c.column_name) ?? [];
-  const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
+  const pkCol = selectedTableMeta?.columns.find((c) => c.is_primary_key)?.column_name
+    ?? colHeaders.find((c) => c === "id")
+    ?? colHeaders[0];
   const selectableIds = new Set<string | number>(
     tableRows.map((row) => row[pkCol] as string | number).filter((v) => v !== undefined && v !== null)
   );
@@ -1023,6 +1027,16 @@ export default function DatabasePage({
                       )}
                     </div>
                   </div>
+
+                  {/* No primary key warning */}
+                  {selectedTableMeta && !selectedTableMeta.columns.some((c) => c.is_primary_key) && (
+                    <div className="flex items-center gap-2.5 px-4 py-2.5 bg-yellow-500/5 border-b border-yellow-500/20 shrink-0">
+                      <AlertTriangle size={13} className="shrink-0 text-yellow-500" />
+                      <span className="text-xs text-yellow-400/90">
+                        This table has no primary key. Row operations (edit, delete) may affect multiple rows. Add a primary key column to ensure safe row-level operations.
+                      </span>
+                    </div>
+                  )}
 
                   {/* Data / Definition view */}
                   {tableView === "definition" ? ((() => {

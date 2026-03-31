@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Zap, Hash, CheckCircle2, Loader2, Eye, EyeOff } from "lucide-react";
+import { Zap, Hash, CheckCircle2, Loader2, Code2, Eye } from "lucide-react";
 
 type TemplateType = "magic_link" | "otp";
 
@@ -13,29 +13,54 @@ interface Template {
 const DEFAULTS: Record<TemplateType, Template> = {
   magic_link: {
     subject: "Your magic link to sign in",
-    body: `Hi {{name}},
-
-Click the link below to sign in to your account. This link expires in 15 minutes.
-
-{{magic_link}}
-
-If you did not request this link, you can safely ignore this email.
-
-— The Team`,
+    body: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f4f5; margin: 0; padding: 32px 16px; }
+    .card { background: #fff; border-radius: 8px; max-width: 480px; margin: 0 auto; padding: 40px 36px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    h2 { font-size: 20px; color: #18181b; margin: 0 0 12px; }
+    p { font-size: 15px; color: #52525b; line-height: 1.6; margin: 0 0 20px; }
+    .btn { display: inline-block; background: #6366f1; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-size: 15px; font-weight: 600; }
+    .footer { font-size: 12px; color: #a1a1aa; margin-top: 28px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Sign in to your account</h2>
+    <p>Hi {{name}}, click the button below to sign in. This link expires in {{expires_in}}.</p>
+    <a href="{{magic_link}}" class="btn">Sign in</a>
+    <p class="footer">If you didn't request this, you can safely ignore this email.</p>
+  </div>
+</body>
+</html>`,
   },
   otp: {
     subject: "Your verification code",
-    body: `Hi {{name}},
-
-Your verification code is:
-
-{{code}}
-
-This code expires in 10 minutes. Do not share this code with anyone.
-
-If you did not request this code, you can safely ignore this email.
-
-— The Team`,
+    body: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f4f5; margin: 0; padding: 32px 16px; }
+    .card { background: #fff; border-radius: 8px; max-width: 480px; margin: 0 auto; padding: 40px 36px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    h2 { font-size: 20px; color: #18181b; margin: 0 0 12px; }
+    p { font-size: 15px; color: #52525b; line-height: 1.6; margin: 0 0 20px; }
+    .code { font-size: 36px; font-weight: 700; letter-spacing: 8px; color: #18181b; background: #f4f4f5; border-radius: 8px; padding: 16px 24px; display: inline-block; margin: 8px 0 24px; }
+    .footer { font-size: 12px; color: #a1a1aa; margin-top: 28px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Your verification code</h2>
+    <p>Hi {{name}}, use the code below to verify your identity. It expires in {{expires_in}}.</p>
+    <div class="code">{{code}}</div>
+    <p>Do not share this code with anyone.</p>
+    <p class="footer">If you didn't request this, you can safely ignore this email.</p>
+  </div>
+</body>
+</html>`,
   },
 };
 
@@ -69,6 +94,22 @@ const TABS = [
   },
 ];
 
+const SAMPLE_VARS: Record<string, string> = {
+  "{{name}}": "Alex Johnson",
+  "{{email}}": "alex@example.com",
+  "{{magic_link}}": "https://yourapp.com/auth/verify?token=abc123",
+  "{{code}}": "847291",
+  "{{expires_in}}": "15 minutes",
+};
+
+function resolvePreview(html: string): string {
+  let result = html;
+  for (const [key, val] of Object.entries(SAMPLE_VARS)) {
+    result = result.replaceAll(key, val);
+  }
+  return result;
+}
+
 function TemplateEditor({
   projectId,
   type,
@@ -81,7 +122,7 @@ function TemplateEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [preview, setPreview] = useState(false);
+  const [mode, setMode] = useState<"edit" | "preview">("edit");
 
   useEffect(() => {
     setLoading(true);
@@ -119,21 +160,6 @@ function TemplateEditor({
     setBody(DEFAULTS[type].body);
   }
 
-  function renderPreview(text: string) {
-    const sampleVars: Record<string, string> = {
-      "{{name}}": "Alex Johnson",
-      "{{email}}": "alex@example.com",
-      "{{magic_link}}": "https://yourapp.com/auth/verify?token=abc123...",
-      "{{code}}": "847 291",
-      "{{expires_in}}": type === "magic_link" ? "15 minutes" : "10 minutes",
-    };
-    let result = text;
-    for (const [key, val] of Object.entries(sampleVars)) {
-      result = result.replaceAll(key, val);
-    }
-    return result;
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-40">
@@ -155,30 +181,62 @@ function TemplateEditor({
         />
       </div>
 
-      {/* Body */}
+      {/* Body editor with Edit / Preview tabs */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <label className="text-xs text-zinc-500">Email Body</label>
-          <button
-            onClick={() => setPreview(!preview)}
-            className="cursor-pointer flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-          >
-            {preview ? <EyeOff size={12} /> : <Eye size={12} />}
-            {preview ? "Edit" : "Preview"}
-          </button>
+          <label className="text-xs text-zinc-500">Email Body (HTML)</label>
+          <div className="flex items-center gap-0.5 bg-zinc-800 border border-zinc-700 rounded-md p-0.5">
+            <button
+              onClick={() => setMode("edit")}
+              className={`cursor-pointer flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                mode === "edit"
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Code2 size={11} />
+              HTML
+            </button>
+            <button
+              onClick={() => setMode("preview")}
+              className={`cursor-pointer flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                mode === "preview"
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Eye size={11} />
+              Preview
+            </button>
+          </div>
         </div>
 
-        {preview ? (
-          <div className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-4 py-3 text-sm text-zinc-300 whitespace-pre-wrap font-mono min-h-[220px] leading-relaxed">
-            {renderPreview(body)}
-          </div>
-        ) : (
+        {mode === "edit" ? (
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            rows={10}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 font-mono resize-y"
+            rows={18}
+            spellCheck={false}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 font-mono resize-y leading-relaxed"
           />
+        ) : (
+          <div className="rounded-md border border-zinc-700 overflow-hidden">
+            <div className="bg-zinc-800/60 border-b border-zinc-700 px-3 py-1.5 flex items-center gap-2">
+              <span className="text-[11px] text-zinc-500">
+                Sample data applied —{" "}
+                <span className="text-zinc-400">
+                  {Object.keys(SAMPLE_VARS).join(", ")}
+                </span>
+              </span>
+            </div>
+            <iframe
+              srcDoc={resolvePreview(body)}
+              title="Email preview"
+              className="w-full bg-white"
+              style={{ height: 480, border: "none" }}
+              sandbox="allow-same-origin"
+            />
+          </div>
         )}
       </div>
 
