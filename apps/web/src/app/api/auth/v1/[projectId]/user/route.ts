@@ -1,6 +1,71 @@
 /**
- * GET /api/auth/v1/[projectId]/user  — get current authenticated user
- * PATCH /api/auth/v1/[projectId]/user — update current user's profile
+ * @swagger
+ * /api/auth/v1/{projectId}/user:
+ *   get:
+ *     summary: Get current authenticated user
+ *     tags: [Auth]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Postbase-Token
+ *         required: true
+ *         description: Access JWT
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User found
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: User not found
+ *   patch:
+ *     summary: Update current authenticated user
+ *     tags: [Auth]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Postbase-Token
+ *         required: true
+ *         description: Access JWT
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               image:
+ *                 type: string
+ *                 format: uri
+ *               data:
+ *                 type: object
+ *                 description: User metadata
+ *     responses:
+ *       200:
+ *         description: User updated successfully
+ *       400:
+ *         description: Invalid JSON or validation error
+ *       401:
+ *         description: Not authenticated
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";

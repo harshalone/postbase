@@ -1,6 +1,25 @@
 /**
- * GET /api/storage/v1/object/public/[bucket]/[...path]
- * Serve a publicly accessible object (no auth required if bucket is public).
+ * @swagger
+ * /api/storage/v1/object/public/{bucket}/{path}:
+ *   get:
+ *     summary: Download a public object
+ *     tags: [Storage]
+ *     parameters:
+ *       - in: path
+ *         name: bucket
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Returns object binary data
+ *       404:
+ *         description: Object or public bucket not found
  */
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";

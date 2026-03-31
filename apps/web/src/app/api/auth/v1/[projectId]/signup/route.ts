@@ -1,11 +1,48 @@
 /**
- * POST /api/auth/v1/[projectId]/signup
- *
- * Sign up a new user with email + password.
- * Requires: Authorization: Bearer <anon-key>
- *
- * Body: { email, password, data?: Record<string,unknown> }
- * Returns: { user, session }
+ * @swagger
+ * /api/auth/v1/{projectId}/signup:
+ *   post:
+ *     summary: Sign up with email and password
+ *     tags: [Auth]
+ *     description: Sign up a new user using email and password. Returns session on success.
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *                 description: Minimum 6 characters
+ *               data:
+ *                 type: object
+ *                 description: Optional user metadata
+ *     responses:
+ *       200:
+ *         description: Successfully signed up and returns session tokens
+ *       400:
+ *         description: Invalid JSON or failed validation
+ *       401:
+ *         description: Missing or invalid API key
+ *       422:
+ *         description: User already registered
  */
 import { NextRequest } from "next/server";
 import { hash } from "bcryptjs";

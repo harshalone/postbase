@@ -1,10 +1,76 @@
 /**
- * GET /api/auth/v1/[projectId]/verify
- *
- * Verify a magic link token. Called when user clicks the email link.
- * Query params: token, email, redirectTo?
- *
- * On success: redirects to redirectTo (or /) with session set in cookie.
+ * @swagger
+ * /api/auth/v1/{projectId}/verify:
+ *   get:
+ *     summary: Verify magic link token
+ *     tags: [Auth]
+ *     description: Verify a magic link token called when user clicks the email link. Redirects on success.
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: token
+ *         required: true
+ *         description: Magic link token
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: email
+ *         required: true
+ *         description: User email
+ *         schema:
+ *           type: string
+ *           format: email
+ *       - in: query
+ *         name: redirectTo
+ *         required: false
+ *         description: URL to redirect to on success
+ *         schema:
+ *           type: string
+ *     responses:
+ *       302:
+ *         description: Redirects to redirectTo with session set in cookie
+ *       400:
+ *         description: Missing token/email or invalid/expired token
+ *       404:
+ *         description: User not found
+ *   post:
+ *     summary: Verify magic link token (API)
+ *     tags: [Auth]
+ *     description: Verify a magic link token programmatically without redirect.
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - token
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               token:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successfully verified token and returns session
+ *       400:
+ *         description: Invalid JSON or missing/invalid token
+ *       404:
+ *         description: User not found
  */
 import { NextRequest } from "next/server";
 import { signJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";

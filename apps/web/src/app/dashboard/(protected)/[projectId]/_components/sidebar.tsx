@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Puzzle,
   Terminal,
+  BookOpen,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
   { label: "API Keys",      icon: Key,              suffix: "/api-keys"     },
   { label: "Audit Logs",    icon: ScrollText,       suffix: "/logs"         },
   { label: "Settings",      icon: Settings,         suffix: "/settings"     },
+  { label: "API Docs",      icon: BookOpen,         suffix: "", external: "/docs/api" },
 ];
 
 export function ProjectSidebar({ projectId }: { projectId: string }) {
@@ -73,6 +75,21 @@ export function ProjectSidebar({ projectId }: { projectId: string }) {
       <nav className="flex-1 p-3 space-y-1">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
+          if (item.external) {
+            return (
+              <a
+                key={item.label}
+                href={item.external}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={collapsed ? item.label : undefined}
+                className={`cursor-pointer flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 ${collapsed ? "justify-center" : ""}`}
+              >
+                <Icon size={16} className="shrink-0" />
+                {!collapsed && <span>{item.label}</span>}
+              </a>
+            );
+          }
           const active = isActive(item.suffix);
           return (
             <Link

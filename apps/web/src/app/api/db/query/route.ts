@@ -1,14 +1,63 @@
 /**
- * Database query API
- * POST /api/db/query
- *
- * Headers:
- *   Authorization: Bearer <anon-key | service-role-key>
- *   X-Postbase-Token: <access-jwt>  (optional — identifies the authenticated user for RLS)
- *   Content-Type: application/json
- *
- * anon key   → enforces RLS
- * service key → bypasses RLS, full access
+ * @swagger
+ * /api/db/query:
+ *   post:
+ *     summary: Execute database queries
+ *     tags: [Database]
+ *     description: Execute database operations (select, insert, update, upsert, delete) securely honoring Row Level Security (RLS) policies based on the provided authorization token.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: X-Postbase-Token
+ *         required: false
+ *         description: Optional access JWT that identifies the authenticated user for RLS.
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [operation, table]
+ *             properties:
+ *               operation:
+ *                 type: string
+ *                 enum: [select, insert, update, upsert, delete]
+ *                 description: The database operation to perform
+ *               table:
+ *                 type: string
+ *                 description: The table name
+ *               columns:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Columns to select (only for select operation)
+ *               filters:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     column:
+ *                       type: string
+ *                     operator:
+ *                       type: string
+ *                     value: {}
+ *               data:
+ *                 description: Data object or array of objects to insert/update
+ *                 type: object
+ *               limit:
+ *                 type: integer
+ *               offset:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Query executed successfully
+ *       400:
+ *         description: Invalid query payload or query failed
+ *       401:
+ *         description: Missing or invalid API key
  */
 import { NextRequest } from "next/server";
 import { pool } from "@/lib/db";

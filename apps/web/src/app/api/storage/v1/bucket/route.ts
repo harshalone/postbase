@@ -1,6 +1,50 @@
 /**
- * GET  /api/storage/v1/bucket          — list buckets
- * POST /api/storage/v1/bucket          — create bucket
+ * @swagger
+ * /api/storage/v1/bucket:
+ *   get:
+ *     summary: List storage buckets
+ *     tags: [Storage]
+ *     description: Retrieve all storage buckets for the authenticated project.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved list of buckets
+ *       401:
+ *         description: Missing or invalid API key
+ *   post:
+ *     summary: Create storage bucket
+ *     tags: [Storage]
+ *     description: Create a new storage bucket.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [id, name]
+ *             properties:
+ *               id:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               public:
+ *                 type: boolean
+ *               file_size_limit:
+ *                 type: integer
+ *               allowed_mime_types:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       201:
+ *         description: Successfully created storage bucket
+ *       400:
+ *         description: Invalid JSON or validation error
+ *       401:
+ *         description: Missing or invalid API key
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";

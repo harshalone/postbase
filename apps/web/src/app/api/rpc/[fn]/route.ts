@@ -1,14 +1,46 @@
 /**
- * POST /api/rpc/[fn]
- *
- * Call a PostgreSQL function in the project's schema.
- * Requires: Authorization: Bearer <anon-key | service-role-key>
- * Optional: X-Postbase-Token for authenticated user context (RLS)
- *
- * Body: { args?: Record<string, unknown>, count?: 'exact' }
- *
- * Example: postbase.rpc('get_nearby_posts', { lat: 40.7, lng: -74.0 })
- * → SELECT * FROM get_nearby_posts(lat => $1, lng => $2)
+ * @swagger
+ * /api/rpc/{fn}:
+ *   post:
+ *     summary: Call a PostgreSQL function
+ *     tags: [Database]
+ *     description: Call a PostgreSQL function in the project's schema honoring RLS.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: fn
+ *         required: true
+ *         description: The function name
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Postbase-Token
+ *         required: false
+ *         description: Optional access JWT that identifies the authenticated user for RLS.
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               args:
+ *                 type: object
+ *                 description: Arguments to pass to the function
+ *               count:
+ *                 type: string
+ *                 enum: [exact, planned, estimated]
+ *                 description: Whether to count rows
+ *     responses:
+ *       200:
+ *         description: Function executed successfully
+ *       400:
+ *         description: Invalid JSON or execution error
+ *       401:
+ *         description: Missing or invalid API key
  */
 import { NextRequest } from "next/server";
 import { Pool } from "pg";

@@ -1,9 +1,40 @@
 /**
- * POST /api/auth/v1/[projectId]/email-otp
- *
- * Send a 6-digit OTP code to the user's email.
- * Requires: Authorization: Bearer <anon-key>
- * Body: { email }
+ * @swagger
+ * /api/auth/v1/{projectId}/email-otp:
+ *   post:
+ *     summary: Send 6-digit OTP code to email
+ *     tags: [Auth]
+ *     description: Send a 6-digit OTP code to the user's email for authentication or signup.
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *     responses:
+ *       200:
+ *         description: OTP successfully sent
+ *       400:
+ *         description: Invalid JSON or invalid email
+ *       401:
+ *         description: Missing or invalid API key
+ *       500:
+ *         description: Email provider not configured for this project
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";

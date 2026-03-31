@@ -1,7 +1,36 @@
 /**
- * DELETE /api/storage/v1/object/[bucket]
- * Body: { prefixes: string[] }
- * Delete multiple objects from a bucket.
+ * @swagger
+ * /api/storage/v1/object/{bucket}:
+ *   delete:
+ *     summary: Delete multiple objects
+ *     tags: [Storage]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: bucket
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [prefixes]
+ *             properties:
+ *               prefixes:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Objects successfully deleted
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Bucket not found
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";

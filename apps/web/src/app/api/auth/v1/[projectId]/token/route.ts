@@ -1,12 +1,53 @@
 /**
- * POST /api/auth/v1/[projectId]/token
- *
- * Exchange credentials or refresh token for a session.
- *
- * grant_type=password:       { email, password }
- * grant_type=refresh_token:  { refresh_token }
- *
- * Requires: Authorization: Bearer <anon-key>
+ * @swagger
+ * /api/auth/v1/{projectId}/token:
+ *   post:
+ *     summary: Exchange credentials or refresh token
+ *     tags: [Auth]
+ *     description: Exchange email and password or a refresh token for a session.
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             oneOf:
+ *               - type: object
+ *                 required: [grant_type, email, password]
+ *                 properties:
+ *                   grant_type:
+ *                     type: string
+ *                     enum: [password]
+ *                   email:
+ *                     type: string
+ *                     format: email
+ *                   password:
+ *                     type: string
+ *               - type: object
+ *                 required: [grant_type, refresh_token]
+ *                 properties:
+ *                   grant_type:
+ *                     type: string
+ *                     enum: [refresh_token]
+ *                   refresh_token:
+ *                     type: string
+ *     responses:
+ *       200:
+ *         description: Successfully acquired session
+ *       400:
+ *         description: Invalid JSON or credentials
+ *       401:
+ *         description: Missing or invalid API key, or invalid refresh token
+ *       403:
+ *         description: Account is banned
  */
 import { NextRequest } from "next/server";
 import { compare } from "bcryptjs";

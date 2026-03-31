@@ -1,9 +1,30 @@
 /**
- * POST /api/auth/v1/[projectId]/logout
- *
- * Invalidate the current session (delete refresh token from DB).
- * Requires: Authorization: Bearer <anon-key>
- * Optional: X-Postbase-Token: <access-jwt> to identify the session.
+ * @swagger
+ * /api/auth/v1/{projectId}/logout:
+ *   post:
+ *     summary: Logout user
+ *     tags: [Auth]
+ *     description: Invalidate the current session
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Postbase-Token
+ *         required: false
+ *         description: Access JWT to identify session
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Logged out
+ *       401:
+ *         description: Missing API key
  */
 import { NextRequest } from "next/server";
 import { validateApiKey } from "@/lib/auth/keys";

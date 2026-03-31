@@ -1,9 +1,46 @@
 /**
- * POST /api/auth/v1/[projectId]/email-otp/verify
- *
- * Verify a 6-digit email OTP code and return session tokens.
- * Requires: Authorization: Bearer <anon-key>
- * Body: { email, code }
+ * @swagger
+ * /api/auth/v1/{projectId}/email-otp/verify:
+ *   post:
+ *     summary: Verify email OTP code
+ *     tags: [Auth]
+ *     description: Verify a 6-digit email OTP code and return session tokens
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               code:
+ *                 type: string
+ *                 minLength: 6
+ *                 maxLength: 6
+ *                 description: The 6-digit OTP code received via email
+ *     responses:
+ *       200:
+ *         description: Successfully verified email OTP code and returned session tokens
+ *       400:
+ *         description: Invalid request body or expired/invalid code
+ *       401:
+ *         description: Missing or invalid API key
+ *       404:
+ *         description: User not found
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";

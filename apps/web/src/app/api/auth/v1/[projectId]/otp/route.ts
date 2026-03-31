@@ -1,9 +1,50 @@
 /**
- * POST /api/auth/v1/[projectId]/otp
- *
- * Send a magic link / OTP to the user's email.
- * Requires: Authorization: Bearer <anon-key>
- * Body: { email, redirectTo? }
+ * @swagger
+ * /api/auth/v1/{projectId}/otp:
+ *   post:
+ *     summary: Send Magic Link or OTP
+ *     tags: [Auth]
+ *     description: Send a magic link or OTP to the user's email based on the requested type.
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               redirectTo:
+ *                 type: string
+ *                 format: uri
+ *                 description: URL to redirect to after magic link verification
+ *               type:
+ *                 type: string
+ *                 enum: [magic_link, otp]
+ *                 description: Authentication type. Defaults to magic_link
+ *     responses:
+ *       200:
+ *         description: Successfully sent OTP or Magic Link
+ *       400:
+ *         description: Invalid JSON or validation error
+ *       401:
+ *         description: Missing or invalid API key
+ *       403:
+ *         description: Requested provider/type is not enabled
+ *       500:
+ *         description: Email provider not configured
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";

@@ -1,8 +1,34 @@
 /**
- * GET /api/auth/v1/[projectId]/session
- *
- * Validate a session token and return the current session.
- * Accepts X-Postbase-Session header (refresh token) or X-Postbase-Token (JWT).
+ * @swagger
+ * /api/auth/v1/{projectId}/session:
+ *   get:
+ *     summary: Get current session
+ *     tags: [Auth]
+ *     description: Validate a session token and return the current session.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         description: The project ID
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Postbase-Session
+ *         required: false
+ *         description: Refresh token
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Postbase-Token
+ *         required: false
+ *         description: Access JWT
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Returns session or null
  */
 import { NextRequest } from "next/server";
 import { validateApiKey } from "@/lib/auth/keys";

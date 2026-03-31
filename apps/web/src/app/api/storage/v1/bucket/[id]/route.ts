@@ -1,7 +1,67 @@
 /**
- * GET    /api/storage/v1/bucket/[id]   — get bucket
- * PUT    /api/storage/v1/bucket/[id]   — update bucket
- * DELETE /api/storage/v1/bucket/[id]   — delete bucket
+ * @swagger
+ * /api/storage/v1/bucket/{id}:
+ *   get:
+ *     summary: Get bucket details
+ *     tags: [Storage]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Bucket details
+ *       404:
+ *         description: Bucket not found
+ *   put:
+ *     summary: Update bucket settings
+ *     tags: [Storage]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               public:
+ *                 type: boolean
+ *               file_size_limit:
+ *                 type: integer
+ *               allowed_mime_types:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Bucket updated
+ *   delete:
+ *     summary: Delete a bucket
+ *     tags: [Storage]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Bucket deleted
+ *       409:
+ *         description: Bucket not empty
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";

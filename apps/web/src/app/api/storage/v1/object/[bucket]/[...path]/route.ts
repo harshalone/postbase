@@ -1,8 +1,99 @@
 /**
- * POST   /api/storage/v1/object/[bucket]/[...path]  — upload object
- * PUT    /api/storage/v1/object/[bucket]/[...path]  — upsert object
- * GET    /api/storage/v1/object/[bucket]/[...path]  — download object
- * DELETE /api/storage/v1/object/[bucket]            — delete objects (handled by /object/[bucket] route)
+ * @swagger
+ * /api/storage/v1/object/{bucket}/{path}:
+ *   post:
+ *     summary: Upload a new object
+ *     tags: [Storage]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: bucket
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Postbase-Token
+ *         required: false
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *         application/octet-stream:
+ *           schema:
+ *             type: string
+ *             format: binary
+ *     responses:
+ *       200:
+ *         description: Object uploaded
+ *   put:
+ *     summary: Upsert an object
+ *     tags: [Storage]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: bucket
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *         application/octet-stream:
+ *           schema:
+ *             type: string
+ *             format: binary
+ *     responses:
+ *       200:
+ *         description: Object upserted
+ *   get:
+ *     summary: Download an object
+ *     tags: [Storage]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: bucket
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Returns object binary data
+ *         content:
+ *           application/octet-stream:
+ *             schema:
+ *               type: string
+ *               format: binary
  */
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
