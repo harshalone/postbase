@@ -104,7 +104,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       [email, token, expires]
     );
 
-    const baseUrl = process.env.NEXTAUTH_URL ?? req.nextUrl.origin;
+    const { getBaseUrl } = await import("@/lib/get-base-url");
+    const baseUrl = getBaseUrl();
     const magicLink = `${baseUrl}/api/auth/v1/${projectId}/verify?token=${token}&email=${encodeURIComponent(email)}${redirectTo ? `&redirectTo=${encodeURIComponent(redirectTo)}` : ""}`;
 
     // Email settings still live in _postbase (project config, not user data)

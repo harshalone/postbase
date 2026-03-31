@@ -1,4 +1,5 @@
 import { type NextAuthConfig } from "next-auth";
+import { getBaseUrl } from "@/lib/get-base-url";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 import Discord from "next-auth/providers/discord";
@@ -96,7 +97,7 @@ export async function buildAuthConfig(
             Notion({
               clientId,
               clientSecret,
-              redirectUri: `${process.env.NEXTAUTH_URL}/api/auth/${projectId}/callback/notion`,
+              redirectUri: `${getBaseUrl()}/api/auth/${projectId}/callback/notion`,
             })
           );
         break;

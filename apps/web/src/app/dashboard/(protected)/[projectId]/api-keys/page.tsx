@@ -1,3 +1,4 @@
+import { getBaseUrl } from "@/lib/get-base-url";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -13,6 +14,7 @@ export default async function ApiKeysPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
+  const baseUrl = getBaseUrl();
 
   const [project] = await db
     .select()
@@ -39,10 +41,10 @@ export default async function ApiKeysPage({
               <p className="text-xs text-zinc-500 mb-2">The base URL of this postbase instance.</p>
               <div className="flex items-start gap-2">
                 <code className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-xs text-zinc-300 font-mono break-all">
-                  {process.env.NEXTAUTH_URL ?? "http://localhost:3000"}
+                  {baseUrl}
                 </code>
                 <div className="shrink-0">
-                  <CopyButton value={process.env.NEXTAUTH_URL ?? "http://localhost:3000"} />
+                  <CopyButton value={baseUrl} />
                 </div>
               </div>
             </div>
@@ -87,14 +89,14 @@ export default async function ApiKeysPage({
 
 // Anon client (browser-safe, respects RLS)
 const postbase = createClient(
-  '${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}',
+  '${baseUrl}',
   '${projectId}',
   '${project.anonKey}'
 )
 
 // Service role client (server-side only, bypasses RLS)
 const postbaseAdmin = createClient(
-  '${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}',
+  '${baseUrl}',
   '${projectId}',
   '${project.serviceRoleKey}'
 )`}

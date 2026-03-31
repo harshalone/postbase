@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useSlidePanel } from "@/hooks/use-slide-panel";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, X, AlertTriangle } from "lucide-react";
+import { Plus, X, AlertTriangle, Trash2 } from "lucide-react";
 import { AddColumnModal } from "./add-column-modal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -252,15 +252,101 @@ function ColumnPanel({
   );
 }
 
+// ─── Delete confirmation modal ────────────────────────────────────────────────
+
+function DeleteUserModal({
+  user,
+  projectId,
+  onDeleted,
+  onClose,
+}: {
+  user: DashboardUser;
+  projectId: string;
+  onDeleted: (userId: string) => void;
+  onClose: () => void;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function handleDelete() {
+    setError(null);
+    startTransition(async () => {
+      const res = await fetch(`/api/dashboard/${projectId}/users/${user.id}`, {
+        method: "DELETE",
+      });
+      if (res.ok || res.status === 204) {
+        onDeleted(user.id);
+        onClose();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? "Failed to delete user");
+      }
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-6 space-y-4">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-9 h-9 rounded-full bg-red-900/30 border border-red-800/40">
+              <AlertTriangle size={16} className="text-red-400" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-white">Delete user?</h2>
+              <p className="text-xs text-zinc-500 mt-0.5">This action cannot be undone</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3">
+          <p className="text-xs text-zinc-400 mb-1">User to be deleted</p>
+          <p className="text-sm font-medium text-white">{user.name ?? user.email}</p>
+          {user.name && <p className="text-xs text-zinc-500">{user.email}</p>}
+        </div>
+
+        <p className="text-xs text-zinc-500 leading-relaxed">
+          This will permanently remove the user and all associated data from your project database.
+        </p>
+
+        {error && (
+          <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">{error}</p>
+        )}
+
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={onClose}
+            className="cursor-pointer flex-1 px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={isPending}
+            className="cursor-pointer flex-1 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+          >
+            {isPending ? "Deleting…" : "Delete user"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function UsersTable({ projectId, initialUsers, initialTotal, initialColumns }: UsersTableProps) {
   const toast = useToast();
   const [users, setUsers] = useState<DashboardUser[]>(initialUsers);
-  const [total] = useState(initialTotal);
+  const [total, setTotal] = useState(initialTotal);
   const [columns, setColumns] = useState<UserColumnDef[]>(initialColumns);
   const [search, setSearch] = useState("");
   const [selectedCol, setSelectedCol] = useState<UserColumnDef | null>(null);
+  const [userToDelete, setUserToDelete] = useState<DashboardUser | null>(null);
 
   const addColumnPanel = useSlidePanel();
   const colDetailPanel = useSlidePanel();
@@ -304,6 +390,12 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
   function handleColumnDeleted(key: string) {
     setColumns((prev) => prev.filter((c) => c.key !== key));
     setSelectedCol(null);
+  }
+
+  function handleUserDeleted(userId: string) {
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    setTotal((prev) => prev - 1);
+    toast.success("User deleted", "The user has been permanently removed");
   }
 
   const filtered = search.trim()
@@ -362,6 +454,7 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
                   </button>
                 </th>
               ))}
+              <th className="px-4 py-3 font-medium" />
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
@@ -380,7 +473,7 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
               </tr>
             ) : (
               filtered.map((user) => (
-                <tr key={user.id} className="hover:bg-zinc-800/40 transition-colors">
+                <tr key={user.id} className="group hover:bg-zinc-800/40 transition-colors">
                   {/* User — locked */}
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-3">
@@ -435,6 +528,19 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
                       />
                     </td>
                   ))}
+
+                  {/* Actions */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => setUserToDelete(user)}
+                        className="cursor-pointer flex items-center gap-1.5 px-2 py-1 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-950/30 transition-colors"
+                        title="Delete user"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))
             )}
@@ -465,6 +571,16 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
           onDeleted={handleColumnDeleted}
           onClose={() => colDetailPanel.close()}
           closing={colDetailPanel.closing}
+        />
+      )}
+
+      {/* Delete user confirmation modal */}
+      {userToDelete && (
+        <DeleteUserModal
+          user={userToDelete}
+          projectId={projectId}
+          onDeleted={handleUserDeleted}
+          onClose={() => setUserToDelete(null)}
         />
       )}
     </>
