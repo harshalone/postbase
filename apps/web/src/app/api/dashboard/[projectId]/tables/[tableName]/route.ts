@@ -21,13 +21,16 @@ export async function GET(
   const url = new URL(req.url);
   const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 500);
   const offset = Number(url.searchParams.get("offset") ?? 0);
+  const sortCol = url.searchParams.get("sortCol");
+  const sortDir = url.searchParams.get("sortDir") === "desc" ? "DESC" : "ASC";
 
   const pool = getProjectPool(project.databaseUrl);
   const client = await pool.connect();
   try {
     const schema = await ensureProjectSchema(client, projectId);
+    const orderClause = sortCol ? ` ORDER BY "${sortCol.replace(/"/g, "")}" ${sortDir}` : "";
     const { rows } = await client.query(
-      `SELECT * FROM "${schema}"."${tableName}" LIMIT $1 OFFSET $2`,
+      `SELECT * FROM "${schema}"."${tableName}"${orderClause} LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
     const { rows: [{ count }] } = await client.query(

@@ -265,7 +265,7 @@ export default function SqlEditorPage({
   // ─── Export CSV ────────────────────────────────────────────────────────────
 
   function exportCsv() {
-    if (!result || result.error || result.rows.length === 0) return;
+    if (!result || result.error || !result.rows || result.rows.length === 0) return;
     const header = result.fields.map((f) => f.name).join(",");
     const rows = result.rows.map((row) =>
       result!.fields.map((f) => {
@@ -544,7 +544,7 @@ export default function SqlEditorPage({
               {/* Export CSV */}
               <button
                 onClick={exportCsv}
-                disabled={!result || !!result.error || result.rows.length === 0}
+                disabled={!result || !!result.error || !result.rows || result.rows.length === 0}
                 title="Export as CSV"
                 className="cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
               >
@@ -614,7 +614,7 @@ export default function SqlEditorPage({
                   <div className="p-4">
                     <p className="text-red-400 text-sm font-mono whitespace-pre-wrap">{result.error}</p>
                   </div>
-                ) : result.rows.length === 0 ? (
+                ) : !result.rows || result.rows.length === 0 ? (
                   <div className="h-full flex items-center justify-center">
                     <div className="text-center">
                       <p className="text-zinc-500 text-sm">Query returned 0 rows</p>
@@ -689,7 +689,7 @@ export default function SqlEditorPage({
           {result && !result.error && resultTab === "results" && (
             <div className="px-4 py-1 border-t border-zinc-800 flex items-center gap-4 text-xs text-zinc-600 shrink-0">
               <span>{result.command}</span>
-              <span>{result.rowCount ?? result.rows.length} rows</span>
+              <span>{result.rowCount ?? result.rows?.length ?? 0} rows</span>
             </div>
           )}
         </div>

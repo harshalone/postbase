@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, useCallback, use, useRef } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
@@ -197,6 +197,61 @@ export default function DatabasePage({
   // Selection state
   const [selectedRows, setSelectedRows] = useState<Set<string | number>>(new Set());
 
+  // Sort state
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // Freeze state — ordered list of frozen column names (order = freeze order)
+  // Persisted to localStorage per project+table
+  const frozenKey = selectedTable ? `frozen:${projectId}:${selectedTable}` : null;
+  const [frozenOrder, setFrozenOrder] = useState<string[]>([]);
+
+  // Column context menu
+  // anchorRect is the button's bounding rect; resolved position is computed after render
+  const [colMenu, setColMenu] = useState<{ col: Column; anchorRect: DOMRect } | null>(null);
+  const [colMenuPos, setColMenuPos] = useState<{ x: number; y: number; opacity: number }>({ x: 0, y: 0, opacity: 0 });
+  const colMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!colMenu || !colMenuRef.current) return;
+    const menu = colMenuRef.current;
+    const { anchorRect } = colMenu;
+    const menuW = menu.offsetWidth;
+    const menuH = menu.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const GAP = 4;
+
+    // Horizontal: prefer left-aligned to anchor, flip left if it clips right edge
+    let x = anchorRect.left;
+    if (x + menuW > vw - 8) x = anchorRect.right - menuW;
+    if (x < 8) x = 8;
+
+    // Vertical: prefer below anchor, flip above if it clips bottom edge
+    let y = anchorRect.bottom + GAP;
+    if (y + menuH > vh - 8) y = anchorRect.top - menuH - GAP;
+    if (y < 8) y = 8;
+
+    setColMenuPos({ x, y, opacity: 1 });
+  }, [colMenu]);
+
+  // Persist frozen columns to localStorage whenever they change
+  useEffect(() => {
+    if (!frozenKey) return;
+    if (frozenOrder.length === 0) {
+      localStorage.removeItem(frozenKey);
+    } else {
+      localStorage.setItem(frozenKey, JSON.stringify(frozenOrder));
+    }
+  }, [frozenKey, frozenOrder]);
+
+  // Edit column panel
+  const editColPanel = useSlidePanel();
+  const showEditCol = editColPanel.visible;
+  const [editColTarget, setEditColTarget] = useState<Column | null>(null);
+  const [editColName, setEditColName] = useState("");
+  const [editColLoading, setEditColLoading] = useState(false);
+
 
   // SQL editor state
   const [sqlQuery, setSqlQuery] = useState("");
@@ -263,11 +318,14 @@ export default function DatabasePage({
   }, [projectId]);
 
   const fetchTableRows = useCallback(
-    async (tableName: string, offset = 0) => {
+    async (tableName: string, offset = 0, col?: string | null, dir?: "asc" | "desc") => {
       setTableLoading(true);
       try {
+        const resolvedCol = col !== undefined ? col : sortCol;
+        const resolvedDir = dir !== undefined ? dir : sortDir;
+        const sortParam = resolvedCol ? `&sortCol=${encodeURIComponent(resolvedCol)}&sortDir=${resolvedDir}` : "";
         const res = await fetch(
-          `/api/dashboard/${projectId}/tables/${tableName}?limit=${TABLE_LIMIT}&offset=${offset}`
+          `/api/dashboard/${projectId}/tables/${tableName}?limit=${TABLE_LIMIT}&offset=${offset}${sortParam}`
         );
         const data = await res.json();
         setTableRows(data.rows ?? []);
@@ -277,7 +335,7 @@ export default function DatabasePage({
         setTableLoading(false);
       }
     },
-    [projectId]
+    [projectId, sortCol, sortDir]
   );
 
   const fetchHistory = useCallback(async () => {
@@ -316,7 +374,102 @@ export default function DatabasePage({
   function handleSelectTable(name: string) {
     setSelectedTable(name);
     setSelectedRows(new Set());
-    fetchTableRows(name, 0);
+    setSortCol(null);
+    setSortDir("asc");
+    try {
+      const stored = localStorage.getItem(`frozen:${projectId}:${name}`);
+      setFrozenOrder(stored ? (JSON.parse(stored) as string[]) : []);
+    } catch {
+      setFrozenOrder([]);
+    }
+    fetchTableRows(name, 0, null, "asc");
+  }
+
+  function handleSort(colName: string) {
+    if (!selectedTable) return;
+    const newDir = sortCol === colName && sortDir === "asc" ? "desc" : "asc";
+    setSortCol(colName);
+    setSortDir(newDir);
+    fetchTableRows(selectedTable, 0, colName, newDir);
+    setColMenu(null);
+  }
+
+  function handleSortAsc(colName: string) {
+    if (!selectedTable) return;
+    setSortCol(colName);
+    setSortDir("asc");
+    fetchTableRows(selectedTable, 0, colName, "asc");
+    setColMenu(null);
+  }
+
+  function handleSortDesc(colName: string) {
+    if (!selectedTable) return;
+    setSortCol(colName);
+    setSortDir("desc");
+    fetchTableRows(selectedTable, 0, colName, "desc");
+    setColMenu(null);
+  }
+
+  function handleCopyColName(colName: string) {
+    navigator.clipboard.writeText(colName);
+    toast.success(`Copied "${colName}"`);
+    setColMenu(null);
+  }
+
+  function handleFreezeCol(colName: string) {
+    setFrozenOrder((prev) =>
+      prev.includes(colName) ? prev.filter((n) => n !== colName) : [...prev, colName]
+    );
+    setColMenu(null);
+  }
+
+  function openEditCol(col: Column) {
+    setEditColTarget(col);
+    setEditColName(col.column_name);
+    setColMenu(null);
+    editColPanel.open();
+  }
+
+  async function saveEditCol() {
+    if (!selectedTable || !editColTarget || !editColName.trim()) return;
+    if (editColName.trim() === editColTarget.column_name) { editColPanel.close(); return; }
+    setEditColLoading(true);
+    try {
+      const res = await fetch(`/api/dashboard/${projectId}/tables/${selectedTable}/columns`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columnName: editColTarget.column_name, newName: editColName.trim() }),
+      });
+      const data = await res.json();
+      if (data.error) { toast.error(data.error); return; }
+      editColPanel.close();
+      setEditColTarget(null);
+      await fetchTables();
+      fetchTableRows(selectedTable, tableOffset);
+    } finally {
+      setEditColLoading(false);
+    }
+  }
+
+  function handleDeleteCol(col: Column) {
+    if (!selectedTable) return;
+    setColMenu(null);
+    setConfirmModal({
+      message: `Drop column "${col.column_name}" from "${selectedTable}"? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        const res = await fetch(`/api/dashboard/${projectId}/tables/${selectedTable}/columns`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ columnName: col.column_name }),
+        });
+        const data = await res.json();
+        if (data.error) { toast.error(data.error); return; }
+        toast.success(`Column "${col.column_name}" deleted`);
+        await fetchTables();
+        fetchTableRows(selectedTable, tableOffset);
+      },
+    });
   }
 
   function toggleRow(id: string | number) {
@@ -329,50 +482,45 @@ export default function DatabasePage({
   }
 
   function toggleAll() {
-    const colHeaders = tableRows.length > 0 ? Object.keys(tableRows[0]) : [];
-    const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
     if (!pkCol) return;
-
-    if (selectedRows.size === tableRows.length && tableRows.length > 0) {
+    if (selectableIds.size > 0 && selectedRows.size === selectableIds.size) {
       setSelectedRows(new Set());
     } else {
-      const next = new Set<string | number>();
-      tableRows.forEach((row) => {
-        const val = row[pkCol] as string | number;
-        if (val !== undefined && val !== null) next.add(val);
-      });
-      setSelectedRows(next);
+      setSelectedRows(new Set(selectableIds));
     }
   }
 
   async function bulkDelete() {
     if (selectedRows.size === 0 || !selectedTable) return;
-    const colHeaders = tableRows.length > 0 ? Object.keys(tableRows[0]) : [];
-    const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
     if (!pkCol) return;
 
-    if (!confirm(`Delete ${selectedRows.size} selected rows?`)) return;
-
-    const ids = Array.from(selectedRows).map(id => typeof id === 'string' ? `'${id}'` : id).join(', ');
-    const sql = `DELETE FROM "${selectedTable}" WHERE "${pkCol}" IN (${ids})`;
-
-    try {
-      const res = await fetch(`/api/dashboard/${projectId}/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        toast.error(data.error);
-      } else {
-        toast.success(`Deleted ${selectedRows.size} rows`);
-        setSelectedRows(new Set());
-        fetchTableRows(selectedTable, tableOffset);
-      }
-    } catch (err) {
-      toast.error(String(err));
-    }
+    const count = selectedRows.size;
+    setConfirmModal({
+      message: `Delete ${count} selected row${count !== 1 ? "s" : ""} from "${selectedTable}"? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        const ids = Array.from(selectedRows);
+        try {
+          const res = await fetch(`/api/dashboard/${projectId}/tables/${selectedTable}/batch`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pkCol, ids }),
+          });
+          const data = await res.json();
+          if (data.error) {
+            toast.error(data.error);
+          } else if (data.rowCount === 0) {
+            toast.error(`No rows deleted — pkCol "${pkCol}" may not match the primary key`);
+          } else {
+            toast.success(`Deleted ${data.rowCount} row${data.rowCount !== 1 ? "s" : ""}`);
+            setSelectedRows(new Set());
+            fetchTableRows(selectedTable, tableOffset);
+          }
+        } catch (err) {
+          toast.error(String(err));
+        }
+      },
+    });
   }
 
   // ─── Insert row ─────────────────────────────────────────────────────────────
@@ -634,6 +782,17 @@ export default function DatabasePage({
 
   const selectedTableMeta = tables.find((t) => t.table_name === selectedTable);
   const colHeaders = selectedTableMeta?.columns.map((c) => c.column_name) ?? [];
+  const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
+  const selectableIds = new Set<string | number>(
+    tableRows.map((row) => row[pkCol] as string | number).filter((v) => v !== undefined && v !== null)
+  );
+
+  const frozenColumns = selectedTableMeta
+    ? frozenOrder.map((name) => selectedTableMeta.columns.find((c) => c.column_name === name)!).filter(Boolean)
+    : [];
+  const unfrozenColumns = selectedTableMeta
+    ? selectedTableMeta.columns.filter((c) => !frozenOrder.includes(c.column_name))
+    : [];
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -913,98 +1072,220 @@ export default function DatabasePage({
                       </div>
                     );
                   })()) : (
-                    <div className="flex-1 overflow-auto">
-                      <table className="w-full text-xs border-collapse">
-                        <thead className="sticky top-0 bg-zinc-950 z-10">
-                          <tr className="border-b border-zinc-800">
-                            <th className="w-10 px-3 py-2.5 border-r border-zinc-800 bg-zinc-950 text-zinc-700 font-normal select-none">
-                              <div className="flex items-center justify-center">
-                                <input
-                                  type="checkbox"
-                                  checked={tableRows.length > 0 && selectedRows.size === tableRows.length}
-                                  onChange={toggleAll}
-                                  className="cursor-pointer w-3.5 h-3.5 accent-brand-500 rounded border-zinc-700 bg-zinc-900"
-                                />
-                              </div>
-                            </th>
-                            {selectedTableMeta?.columns.map((col) => (
-                              <th
-                                key={col.column_name}
-                                className="text-left px-3 py-2.5 font-medium border-r border-zinc-800 last:border-r-0 whitespace-nowrap min-w-30"
-                              >
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-zinc-200">{col.column_name}</span>
-                                  <span className="text-[10px] text-zinc-600 font-normal font-mono">{col.data_type}</span>
-                                </div>
-                              </th>
-                            ))}
-                            <th className="w-8 border-r-0" />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {tableLoading ? (
-                            <tr>
-                              <td colSpan={99} className="px-4 py-12 text-center text-zinc-600">Loading…</td>
-                            </tr>
-                          ) : tableRows.length === 0 ? (
-                            <tr>
-                              <td colSpan={99} className="px-4 py-12 text-center text-zinc-600">No rows in this table</td>
-                            </tr>
-                          ) : tableRows.map((row, i) => {
-                            const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
-                            const rowId = pkCol ? (row[pkCol] as string | number) : i;
-                            const isSelected = selectedRows.has(rowId);
-
-                            return (
-                              <tr key={i} className={`border-b border-zinc-800/50 hover:bg-zinc-800/20 group ${isSelected ? "bg-brand-500/5 hover:bg-brand-500/10" : ""}`}>
-                                <td className="px-3 py-2 text-zinc-700 border-r border-zinc-800 text-center font-mono select-none">
+                    <div className="flex-1 flex overflow-hidden">
+                      {/* ── Frozen columns panel (hidden when empty) ── */}
+                      {frozenColumns.length > 0 && (
+                        <div className="shrink-0 overflow-hidden border-r-2 border-zinc-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.5)]">
+                          <table className="text-xs border-collapse">
+                            <thead className="sticky top-0 bg-zinc-950 z-10">
+                              <tr className="border-b border-zinc-800">
+                                <th className="w-10 px-3 py-2.5 border-r border-zinc-800 bg-zinc-950 text-zinc-700 font-normal select-none">
                                   <div className="flex items-center justify-center">
                                     <input
                                       type="checkbox"
-                                      checked={isSelected}
-                                      onChange={() => toggleRow(rowId)}
+                                      checked={selectableIds.size > 0 && selectedRows.size === selectableIds.size}
+                                      onChange={toggleAll}
                                       className="cursor-pointer w-3.5 h-3.5 accent-brand-500 rounded border-zinc-700 bg-zinc-900"
                                     />
                                   </div>
-                                </td>
-                              {selectedTableMeta?.columns.map((col) => (
-                                <td
-                                  key={col.column_name}
-                                  className="px-3 py-2 text-zinc-300 border-r border-zinc-800 last:border-r-0 max-w-xs truncate"
-                                  title={String(row[col.column_name] ?? "")}
-                                >
-                                  {row[col.column_name] === null || row[col.column_name] === undefined ? (
-                                    <span className="text-zinc-700 italic">NULL</span>
-                                  ) : typeof row[col.column_name] === "object" ? (
-                                    <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
-                                  ) : (
-                                    String(row[col.column_name])
-                                  )}
-                                </td>
-                              ))}
-                              <td className="px-2 py-2">
-                                <button
-                                  onClick={async () => {
-                                    const pkCol = colHeaders.find((c) => c === "id") ?? colHeaders[0];
-                                    if (!pkCol) return;
-                                    if (!confirm("Delete this row?")) return;
-                                    await fetch(`/api/dashboard/${projectId}/tables/${selectedTable}`, {
-                                      method: "DELETE",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({ where: { [pkCol]: row[pkCol] } }),
-                                    });
-                                    fetchTableRows(selectedTable, tableOffset);
-                                  }}
-                                  className="cursor-pointer opacity-0 group-hover:opacity-100 p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-all"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              </td>
+                                </th>
+                                {frozenColumns.map((col) => {
+                                  const isSorted = sortCol === col.column_name;
+                                  return (
+                                    <th
+                                      key={col.column_name}
+                                      className="text-left px-3 py-2.5 font-medium border-r border-zinc-800 whitespace-nowrap min-w-30 group/col"
+                                    >
+                                      <div className="flex items-center gap-1.5 justify-between">
+                                        <div className="flex items-center gap-1.5">
+                                          <Lock size={9} className="text-brand-500 shrink-0" />
+                                          <span className="text-zinc-200">{col.column_name}</span>
+                                          <span className="text-[10px] text-zinc-600 font-normal font-mono">{col.data_type}</span>
+                                          {isSorted && (
+                                            <span className="text-[9px] text-brand-400 font-mono">{sortDir === "asc" ? "↑" : "↓"}</span>
+                                          )}
+                                        </div>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                            setColMenuPos({ x: 0, y: 0, opacity: 0 });
+                                            setColMenu({ col, anchorRect: rect });
+                                          }}
+                                          className="cursor-pointer opacity-0 group-hover/col:opacity-100 p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-all"
+                                        >
+                                          <ChevronDown size={11} />
+                                        </button>
+                                      </div>
+                                    </th>
+                                  );
+                                })}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {tableLoading ? (
+                                <tr><td colSpan={99} className="px-4 py-12" /></tr>
+                              ) : tableRows.length === 0 ? (
+                                <tr><td colSpan={99} className="px-4 py-12" /></tr>
+                              ) : tableRows.map((row, i) => {
+                                const rowId = pkCol ? (row[pkCol] as string | number) : i;
+                                const isSelected = selectedRows.has(rowId);
+                                return (
+                                  <tr key={i} className={`border-b border-zinc-800/50 hover:bg-zinc-800/20 group ${isSelected ? "bg-brand-500/5 hover:bg-brand-500/10" : ""}`}>
+                                    <td className="px-3 py-2 text-zinc-700 border-r border-zinc-800 text-center font-mono select-none">
+                                      <div className="flex items-center justify-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => toggleRow(rowId)}
+                                          className="cursor-pointer w-3.5 h-3.5 accent-brand-500 rounded border-zinc-700 bg-zinc-900"
+                                        />
+                                      </div>
+                                    </td>
+                                    {frozenColumns.map((col) => (
+                                      <td
+                                        key={col.column_name}
+                                        className="px-3 py-2 text-zinc-300 border-r border-zinc-800 max-w-xs truncate"
+                                        title={String(row[col.column_name] ?? "")}
+                                      >
+                                        {row[col.column_name] === null || row[col.column_name] === undefined ? (
+                                          <span className="text-zinc-700 italic">NULL</span>
+                                        ) : typeof row[col.column_name] === "object" ? (
+                                          <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
+                                        ) : (
+                                          String(row[col.column_name])
+                                        )}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* ── Scrollable main table ── */}
+                      <div className="flex-1 overflow-auto">
+                        <table className="w-full text-xs border-collapse">
+                          <thead className="sticky top-0 bg-zinc-950 z-10">
+                            <tr className="border-b border-zinc-800">
+                              {frozenColumns.length === 0 && (
+                                <th className="w-10 px-3 py-2.5 border-r border-zinc-800 bg-zinc-950 text-zinc-700 font-normal select-none">
+                                  <div className="flex items-center justify-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectableIds.size > 0 && selectedRows.size === selectableIds.size}
+                                      onChange={toggleAll}
+                                      className="cursor-pointer w-3.5 h-3.5 accent-brand-500 rounded border-zinc-700 bg-zinc-900"
+                                    />
+                                  </div>
+                                </th>
+                              )}
+                              {unfrozenColumns.map((col) => {
+                                const isSorted = sortCol === col.column_name;
+                                return (
+                                  <th
+                                    key={col.column_name}
+                                    className="text-left px-3 py-2.5 font-medium border-r border-zinc-800 last:border-r-0 whitespace-nowrap min-w-30 group/col"
+                                  >
+                                    <div className="flex items-center gap-1.5 justify-between">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-zinc-200">{col.column_name}</span>
+                                        <span className="text-[10px] text-zinc-600 font-normal font-mono">{col.data_type}</span>
+                                        {isSorted && (
+                                          <span className="text-[9px] text-brand-400 font-mono">{sortDir === "asc" ? "↑" : "↓"}</span>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                          setColMenuPos({ x: 0, y: 0, opacity: 0 });
+                                          setColMenu({ col, anchorRect: rect });
+                                        }}
+                                        className="cursor-pointer opacity-0 group-hover/col:opacity-100 p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-all"
+                                      >
+                                        <ChevronDown size={11} />
+                                      </button>
+                                    </div>
+                                  </th>
+                                );
+                              })}
+                              <th className="w-8 border-r-0" />
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {tableLoading ? (
+                              <tr>
+                                <td colSpan={99} className="px-4 py-12 text-center text-zinc-600">Loading…</td>
+                              </tr>
+                            ) : tableRows.length === 0 ? (
+                              <tr>
+                                <td colSpan={99} className="px-4 py-12 text-center text-zinc-600">No rows in this table</td>
+                              </tr>
+                            ) : tableRows.map((row, i) => {
+                              const rowId = pkCol ? (row[pkCol] as string | number) : i;
+                              const isSelected = selectedRows.has(rowId);
+                              return (
+                                <tr key={i} className={`border-b border-zinc-800/50 hover:bg-zinc-800/20 group ${isSelected ? "bg-brand-500/5 hover:bg-brand-500/10" : ""}`}>
+                                  {frozenColumns.length === 0 && (
+                                    <td className="px-3 py-2 text-zinc-700 border-r border-zinc-800 text-center font-mono select-none">
+                                      <div className="flex items-center justify-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => toggleRow(rowId)}
+                                          className="cursor-pointer w-3.5 h-3.5 accent-brand-500 rounded border-zinc-700 bg-zinc-900"
+                                        />
+                                      </div>
+                                    </td>
+                                  )}
+                                  {unfrozenColumns.map((col) => (
+                                    <td
+                                      key={col.column_name}
+                                      className="px-3 py-2 text-zinc-300 border-r border-zinc-800 last:border-r-0 max-w-xs truncate"
+                                      title={String(row[col.column_name] ?? "")}
+                                    >
+                                      {row[col.column_name] === null || row[col.column_name] === undefined ? (
+                                        <span className="text-zinc-700 italic">NULL</span>
+                                      ) : typeof row[col.column_name] === "object" ? (
+                                        <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
+                                      ) : (
+                                        String(row[col.column_name])
+                                      )}
+                                    </td>
+                                  ))}
+                                  <td className="px-2 py-2">
+                                    <button
+                                      onClick={() => {
+                                        if (!pkCol) return;
+                                        setConfirmModal({
+                                          message: `Delete this row from "${selectedTable}"? This cannot be undone.`,
+                                          onConfirm: async () => {
+                                            setConfirmModal(null);
+                                            const delRes = await fetch(`/api/dashboard/${projectId}/tables/${selectedTable}`, {
+                                              method: "DELETE",
+                                              headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ where: { [pkCol]: row[pkCol] } }),
+                                            });
+                                            const delData = await delRes.json();
+                                            if (delData.error) { toast.error(delData.error); return; }
+                                            fetchTableRows(selectedTable!, tableOffset);
+                                          },
+                                        });
+                                      }}
+                                      className="cursor-pointer opacity-0 group-hover:opacity-100 p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-all"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
 
@@ -1886,6 +2167,118 @@ with check (
                   Save changes
                 </button>
               </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Column Context Menu ── */}
+      {colMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setColMenu(null)} />
+          <div
+            ref={colMenuRef}
+            className="fixed z-50 w-52 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl py-1 overflow-hidden transition-opacity duration-75"
+            style={{ left: colMenuPos.x, top: colMenuPos.y, opacity: colMenuPos.opacity }}
+          >
+            <button
+              onClick={() => handleSortAsc(colMenu.col.column_name)}
+              className="cursor-pointer w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+            >
+              <ArrowUpDown size={13} className="text-zinc-500 shrink-0" />
+              Sort Ascending
+            </button>
+            <button
+              onClick={() => handleSortDesc(colMenu.col.column_name)}
+              className="cursor-pointer w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+            >
+              <ArrowUpDown size={13} className="text-zinc-500 shrink-0 rotate-180" />
+              Sort Descending
+            </button>
+            <div className="h-px bg-zinc-800 my-1" />
+            <button
+              onClick={() => handleCopyColName(colMenu.col.column_name)}
+              className="cursor-pointer w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+            >
+              <Copy size={13} className="text-zinc-500 shrink-0" />
+              Copy name
+            </button>
+            <button
+              onClick={() => openEditCol(colMenu.col)}
+              className="cursor-pointer w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+            >
+              <Pencil size={13} className="text-zinc-500 shrink-0" />
+              Edit column
+            </button>
+            <button
+              onClick={() => handleFreezeCol(colMenu.col.column_name)}
+              className="cursor-pointer w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+            >
+              <Lock size={13} className={`shrink-0 ${frozenOrder.includes(colMenu.col.column_name) ? "text-brand-400" : "text-zinc-500"}`} />
+              {frozenOrder.includes(colMenu.col.column_name) ? "Unfreeze column" : "Freeze column"}
+            </button>
+            <div className="h-px bg-zinc-800 my-1" />
+            <button
+              onClick={() => handleDeleteCol(colMenu.col)}
+              className="cursor-pointer w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-400 hover:bg-zinc-800 transition-colors"
+            >
+              <Trash2 size={13} className="shrink-0" />
+              Delete column
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── Edit Column Slideover ── */}
+      {showEditCol && editColTarget && (
+        <>
+          <div className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${editColPanel.closing ? "closing" : ""}`} onClick={() => editColPanel.close()} />
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[420px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${editColPanel.closing ? "closing" : ""}`}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+              <div>
+                <h2 className="text-base font-semibold text-white">Edit column</h2>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  in <span className="font-mono text-zinc-400">{selectedTable}</span>
+                </p>
+              </div>
+              <button onClick={() => editColPanel.close()} className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-zinc-800">
+              <div className="px-6 py-5 space-y-4">
+                <div>
+                  <label className="block text-sm text-zinc-300 mb-1.5">Column name</label>
+                  <input
+                    autoFocus
+                    value={editColName}
+                    onChange={(e) => setEditColName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveEditCol(); }}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-zinc-300 mb-1.5">Type</label>
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-500 font-mono cursor-not-allowed">
+                    {editColTarget.data_type}
+                  </div>
+                  <p className="text-xs text-zinc-600 mt-1">Type changes require SQL — use the SQL editor.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
+              <button onClick={() => editColPanel.close()} className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={saveEditCol}
+                disabled={editColLoading || !editColName.trim()}
+                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
+              >
+                {editColLoading ? "Saving…" : "Save changes"}
+              </button>
             </div>
           </div>
         </>

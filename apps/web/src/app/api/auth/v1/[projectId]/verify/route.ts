@@ -50,12 +50,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     );
     if (!user) return Response.json({ error: "User not found" }, { status: 404 });
 
-    if (!user.email_verified) {
-      await client.query(
-        `UPDATE "${schema}"."users" SET "email_verified" = $1 WHERE "id" = $2`,
-        [now, user.id]
-      );
-    }
+    await client.query(
+      `UPDATE "${schema}"."users" SET "email_verified" = $1 WHERE "id" = $2 AND "email_verified" IS NULL`,
+      [now, user.id]
+    );
 
     const secret = getJwtSecret();
     const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
@@ -139,12 +137,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     );
     if (!user) return Response.json({ error: "User not found" }, { status: 404 });
 
-    if (!user.email_verified) {
-      await client.query(
-        `UPDATE "${schema}"."users" SET "email_verified" = $1 WHERE "id" = $2`,
-        [now, user.id]
-      );
-    }
+    await client.query(
+      `UPDATE "${schema}"."users" SET "email_verified" = $1 WHERE "id" = $2 AND "email_verified" IS NULL`,
+      [now, user.id]
+    );
 
     const secret = getJwtSecret();
     const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;

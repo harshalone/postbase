@@ -9,6 +9,60 @@ async function getProject(projectId: string) {
   return project ?? null;
 }
 
+// DELETE /api/dashboard/[projectId]/tables/[tableName]/columns — drop column
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string; tableName: string }> }
+) {
+  const { projectId, tableName } = await params;
+  const project = await getProject(projectId);
+  if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+  const { columnName } = await req.json() as { columnName: string };
+  if (!columnName?.trim()) {
+    return NextResponse.json({ error: "columnName is required" }, { status: 400 });
+  }
+
+  const pool = getProjectPool(project.databaseUrl);
+  const client = await pool.connect();
+  try {
+    const schema = await ensureProjectSchema(client, projectId);
+    await client.query(`ALTER TABLE "${schema}"."${tableName}" DROP COLUMN "${columnName}"`);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  } finally {
+    client.release();
+  }
+}
+
+// PATCH /api/dashboard/[projectId]/tables/[tableName]/columns — rename column
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string; tableName: string }> }
+) {
+  const { projectId, tableName } = await params;
+  const project = await getProject(projectId);
+  if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+  const { columnName, newName } = await req.json() as { columnName: string; newName: string };
+  if (!columnName?.trim() || !newName?.trim()) {
+    return NextResponse.json({ error: "columnName and newName are required" }, { status: 400 });
+  }
+
+  const pool = getProjectPool(project.databaseUrl);
+  const client = await pool.connect();
+  try {
+    const schema = await ensureProjectSchema(client, projectId);
+    await client.query(`ALTER TABLE "${schema}"."${tableName}" RENAME COLUMN "${columnName}" TO "${newName}"`);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  } finally {
+    client.release();
+  }
+}
+
 // POST /api/dashboard/[projectId]/tables/[tableName]/columns — add column
 export async function POST(
   req: NextRequest,
