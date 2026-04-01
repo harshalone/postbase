@@ -199,6 +199,17 @@ export default function DatabasePage({
   // Selection state
   const [selectedRows, setSelectedRows] = useState<Set<string | number>>(new Set());
 
+  // Cell selection & context menu
+  const [selectedCell, setSelectedCell] = useState<{ rowIndex: number; colName: string } | null>(null);
+  const [cellContextMenu, setCellContextMenu] = useState<{
+    x: number;
+    y: number;
+    row: Record<string, unknown>;
+    rowIndex: number;
+    colName: string;
+  } | null>(null);
+  const cellContextMenuRef = useRef<HTMLDivElement>(null);
+
   // Sort state
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -236,6 +247,25 @@ export default function DatabasePage({
 
     setColMenuPos({ x, y, opacity: 1 });
   }, [colMenu]);
+
+  // Close cell context menu on outside click or Escape
+  useEffect(() => {
+    if (!cellContextMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (cellContextMenuRef.current && !cellContextMenuRef.current.contains(e.target as Node)) {
+        setCellContextMenu(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCellContextMenu(null);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [cellContextMenu]);
 
   // Persist frozen columns to localStorage whenever they change
   useEffect(() => {
@@ -301,6 +331,13 @@ export default function DatabasePage({
   });
   const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [errorModal, setErrorModal] = useState<string | null>(null);
+
+  // Edit row panel
+  const editRowPanel = useSlidePanel();
+  const showEditRow = editRowPanel.visible;
+  const [editRowData, setEditRowData] = useState<Record<string, unknown> | null>(null);
+  const [editRowValues, setEditRowValues] = useState<Record<string, string>>({});
+  const [editRowLoading, setEditRowLoading] = useState(false);
 
   // ─── Data fetchers ──────────────────────────────────────────────────────────
 
@@ -526,6 +563,28 @@ export default function DatabasePage({
   }
 
   // ─── Insert row ─────────────────────────────────────────────────────────────
+
+  async function saveEditRow() {
+    if (!selectedTable || !editRowData || !pkCol) return;
+    setEditRowLoading(true);
+    try {
+      const set = Object.fromEntries(
+        Object.entries(editRowValues).filter(([, v]) => v !== "")
+      );
+      const res = await fetch(`/api/dashboard/${projectId}/tables/${selectedTable}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ where: { [pkCol]: editRowData[pkCol] }, set }),
+      });
+      const data = await res.json();
+      if (data.error) { toast.error(data.error); return; }
+      editRowPanel.close();
+      setEditRowData(null);
+      fetchTableRows(selectedTable, tableOffset);
+    } finally {
+      setEditRowLoading(false);
+    }
+  }
 
   async function insertRow() {
     if (!selectedTable) return;
@@ -1156,21 +1215,30 @@ export default function DatabasePage({
                                         />
                                       </div>
                                     </td>
-                                    {frozenColumns.map((col) => (
-                                      <td
-                                        key={col.column_name}
-                                        className="px-3 py-2 text-zinc-300 border-r border-zinc-800 max-w-xs truncate"
-                                        title={String(row[col.column_name] ?? "")}
-                                      >
-                                        {row[col.column_name] === null || row[col.column_name] === undefined ? (
-                                          <span className="text-zinc-700 italic">NULL</span>
-                                        ) : typeof row[col.column_name] === "object" ? (
-                                          <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
-                                        ) : (
-                                          String(row[col.column_name])
-                                        )}
-                                      </td>
-                                    ))}
+                                    {frozenColumns.map((col) => {
+                                      const isCellSelected = selectedCell?.rowIndex === i && selectedCell?.colName === col.column_name;
+                                      return (
+                                        <td
+                                          key={col.column_name}
+                                          className={`px-3 py-2 text-zinc-300 border-r border-zinc-800 max-w-xs truncate cursor-pointer select-none ${isCellSelected ? "ring-1 ring-inset ring-brand-500 bg-brand-500/5" : ""}`}
+                                          title={String(row[col.column_name] ?? "")}
+                                          onClick={() => setSelectedCell({ rowIndex: i, colName: col.column_name })}
+                                          onContextMenu={(e) => {
+                                            e.preventDefault();
+                                            setSelectedCell({ rowIndex: i, colName: col.column_name });
+                                            setCellContextMenu({ x: e.clientX, y: e.clientY, row, rowIndex: i, colName: col.column_name });
+                                          }}
+                                        >
+                                          {row[col.column_name] === null || row[col.column_name] === undefined ? (
+                                            <span className="text-zinc-700 italic">NULL</span>
+                                          ) : typeof row[col.column_name] === "object" ? (
+                                            <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
+                                          ) : (
+                                            String(row[col.column_name])
+                                          )}
+                                        </td>
+                                      );
+                                    })}
                                   </tr>
                                 );
                               })}
@@ -1255,21 +1323,30 @@ export default function DatabasePage({
                                       </div>
                                     </td>
                                   )}
-                                  {unfrozenColumns.map((col) => (
-                                    <td
-                                      key={col.column_name}
-                                      className="px-3 py-2 text-zinc-300 border-r border-zinc-800 last:border-r-0 max-w-xs truncate"
-                                      title={String(row[col.column_name] ?? "")}
-                                    >
-                                      {row[col.column_name] === null || row[col.column_name] === undefined ? (
-                                        <span className="text-zinc-700 italic">NULL</span>
-                                      ) : typeof row[col.column_name] === "object" ? (
-                                        <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
-                                      ) : (
-                                        String(row[col.column_name])
-                                      )}
-                                    </td>
-                                  ))}
+                                  {unfrozenColumns.map((col) => {
+                                    const isCellSelected = selectedCell?.rowIndex === i && selectedCell?.colName === col.column_name;
+                                    return (
+                                      <td
+                                        key={col.column_name}
+                                        className={`px-3 py-2 text-zinc-300 border-r border-zinc-800 last:border-r-0 max-w-xs truncate cursor-pointer select-none ${isCellSelected ? "ring-1 ring-inset ring-brand-500 bg-brand-500/5" : ""}`}
+                                        title={String(row[col.column_name] ?? "")}
+                                        onClick={() => setSelectedCell({ rowIndex: i, colName: col.column_name })}
+                                        onContextMenu={(e) => {
+                                          e.preventDefault();
+                                          setSelectedCell({ rowIndex: i, colName: col.column_name });
+                                          setCellContextMenu({ x: e.clientX, y: e.clientY, row, rowIndex: i, colName: col.column_name });
+                                        }}
+                                      >
+                                        {row[col.column_name] === null || row[col.column_name] === undefined ? (
+                                          <span className="text-zinc-700 italic">NULL</span>
+                                        ) : typeof row[col.column_name] === "object" ? (
+                                          <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
+                                        ) : (
+                                          String(row[col.column_name])
+                                        )}
+                                      </td>
+                                    );
+                                  })}
                                   <td className="px-2 py-2">
                                     <button
                                       onClick={() => {
@@ -2582,6 +2659,147 @@ with check (
                   {insertColLoading ? "Saving…" : <><span>Save</span><kbd className="text-xs bg-brand-600 px-1.5 py-0.5 rounded">⌘↵</kbd></>}
                 </button>
               </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Cell Context Menu ── */}
+      {cellContextMenu && (
+        <div
+          ref={cellContextMenuRef}
+          className="fixed z-[80] min-w-[180px] bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl py-1 text-xs"
+          style={{ left: cellContextMenu.x, top: cellContextMenu.y }}
+        >
+          <button
+            className="cursor-pointer w-full flex items-center gap-3 px-3 py-2 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+            onClick={() => {
+              const val = cellContextMenu.row[cellContextMenu.colName];
+              const text = val === null || val === undefined ? "" : typeof val === "object" ? JSON.stringify(val) : String(val);
+              navigator.clipboard.writeText(text);
+              toast.success("Copied");
+              setCellContextMenu(null);
+            }}
+          >
+            <Copy size={13} className="text-zinc-500" />
+            Copy cell
+          </button>
+          <button
+            className="cursor-pointer w-full flex items-center gap-3 px-3 py-2 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+            onClick={() => {
+              navigator.clipboard.writeText(JSON.stringify(cellContextMenu.row));
+              toast.success("Copied");
+              setCellContextMenu(null);
+            }}
+          >
+            <Copy size={13} className="text-zinc-500" />
+            Copy row
+          </button>
+          <div className="h-px bg-zinc-800 my-1" />
+          <button
+            className="cursor-pointer w-full flex items-center gap-3 px-3 py-2 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+            onClick={() => {
+              const val = cellContextMenu.row[cellContextMenu.colName];
+              const text = val === null || val === undefined ? "" : typeof val === "object" ? JSON.stringify(val) : String(val);
+              toast.success(`Filtered by: ${cellContextMenu.colName} = ${text}`);
+              setCellContextMenu(null);
+            }}
+          >
+            <Search size={13} className="text-zinc-500" />
+            Filter by value
+          </button>
+          <div className="h-px bg-zinc-800 my-1" />
+          <button
+            className="cursor-pointer w-full flex items-center gap-3 px-3 py-2 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+            onClick={() => {
+              setEditRowData(cellContextMenu.row);
+              setEditRowValues(
+                Object.fromEntries(
+                  Object.entries(cellContextMenu.row).map(([k, v]) => [
+                    k,
+                    v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v),
+                  ])
+                )
+              );
+              editRowPanel.open();
+              setCellContextMenu(null);
+            }}
+          >
+            <Pencil size={13} className="text-zinc-500" />
+            Edit row
+          </button>
+          <button
+            className="cursor-pointer w-full flex items-center gap-3 px-3 py-2 text-red-400 hover:bg-zinc-800 hover:text-red-300 transition-colors"
+            onClick={() => {
+              setCellContextMenu(null);
+              if (!pkCol) return;
+              setConfirmModal({
+                message: `Delete this row from "${selectedTable}"? This cannot be undone.`,
+                onConfirm: async () => {
+                  setConfirmModal(null);
+                  const delRes = await fetch(`/api/dashboard/${projectId}/tables/${selectedTable}`, {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ where: { [pkCol]: cellContextMenu.row[pkCol] } }),
+                  });
+                  const delData = await delRes.json();
+                  if (delData.error) { toast.error(delData.error); return; }
+                  fetchTableRows(selectedTable!, tableOffset);
+                },
+              });
+            }}
+          >
+            <Trash2 size={13} className="text-red-500" />
+            Delete row
+          </button>
+        </div>
+      )}
+
+      {/* ── Edit Row Slideover ── */}
+      {showEditRow && editRowData && (
+        <>
+          <div className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${editRowPanel.closing ? "closing" : ""}`} onClick={() => editRowPanel.close()} />
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[520px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${editRowPanel.closing ? "closing" : ""}`}>
+            <div className="px-6 py-4 border-b border-zinc-800 shrink-0 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-white">
+                Edit row in{" "}
+                <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-sm font-mono text-zinc-200">
+                  {selectedTable}
+                </code>
+              </h2>
+              <button onClick={() => editRowPanel.close()} className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-zinc-800">
+              {selectedTableMeta?.columns.map((col) => (
+                <div key={col.column_name} className="px-6 py-4 flex gap-6">
+                  <div className="w-44 shrink-0">
+                    <p className="text-sm text-zinc-200">{col.column_name}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">{col.data_type}</p>
+                    {col.is_primary_key && <span className="text-[10px] text-brand-400 font-mono">primary key</span>}
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      disabled={!!col.is_primary_key}
+                      value={editRowValues[col.column_name] ?? ""}
+                      onChange={(e) => setEditRowValues((v) => ({ ...v, [col.column_name]: e.target.value }))}
+                      placeholder={col.column_default ?? "NULL"}
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
+              <button onClick={() => editRowPanel.close()}
+                className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors">
+                Cancel
+              </button>
+              <button onClick={saveEditRow} disabled={editRowLoading}
+                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors">
+                {editRowLoading ? "Saving…" : "Save changes"}
+              </button>
             </div>
           </div>
         </>

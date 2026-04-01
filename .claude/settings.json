@@ -108,7 +108,13 @@
       "Bash(apps/web/node_modules/.bin/tsc --noEmit -p apps/web/tsconfig.json)",
       "Bash(ls /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/auth/providers/)",
       "Bash(ls /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/auth/providers/[providerId]/)",
-      "Bash(grep -r \"postbase-server\\\\|postbaseAdmin\\\\|postbaseClient\" /Volumes/2TB/code/postbase.com/apps/web/src --include=*.ts --include=*.tsx -l)"
+      "Bash(grep -r \"postbase-server\\\\|postbaseAdmin\\\\|postbaseClient\" /Volumes/2TB/code/postbase.com/apps/web/src --include=*.ts --include=*.tsx -l)",
+      "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src -type f \\\\\\(-name *table* -o -name *record* -o -name *database* \\\\\\))",
+      "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
+      "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/tables -type f -name \"*.tsx\" -o -name \"*.ts\")",
+      "Bash(grep -n \"uuid\\\\|user_uid\\\\|column\\\\|cell\\\\|row\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/tables/page.tsx)",
+      "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src -type f \\\\\\(-name *table* -o -name *grid* -o -name *data* \\\\\\) -name *.tsx)",
+      "Bash(ls -la /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/users/_components/)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
