@@ -302,13 +302,10 @@ export async function GET(req: NextRequest, { params }: Params) {
     const xml = await res.text();
     const { objects, isTruncated, nextToken } = parseListXml(xml);
 
-    return Response.json({
-      objects,
-      isTruncated,
-      nextToken,
-      bucket: conn.bucket,
-      prefix,
-    });
+    return Response.json(
+      { objects, isTruncated, nextToken, bucket: conn.bucket, prefix },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 500 });
   }
@@ -366,11 +363,18 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!keys.length) return Response.json({ error: "No keys provided" }, { status: 400 });
 
     const results = await Promise.allSettled(
-      keys.map((key) =>
-        client.signedFetch("DELETE", key).then((r) => {
-          if (!r.ok && r.status !== 204) throw new Error(`DELETE ${key}: HTTP ${r.status}`);
-        })
-      )
+      keys.map(async (key) => {
+        const r = await client.signedFetch("DELETE", key);
+        // 204 No Content and 200 OK are both valid S3 delete responses
+        if (r.status === 204 || r.status === 200) return;
+        // Handle redirects (3xx) — means signing region/endpoint mismatch
+        if (r.status >= 300 && r.status < 400) {
+          throw new Error(`DELETE ${key}: redirected (${r.status}) — check endpoint/region config`);
+        }
+        const text = await r.text().catch(() => "");
+        const msg = text.match(/<Message>([\s\S]*?)<\/Message>/)?.[1] ?? `HTTP ${r.status}`;
+        throw new Error(`DELETE ${key}: ${msg}`);
+      })
     );
 
     const failed = results

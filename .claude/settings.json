@@ -131,7 +131,8 @@
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]/sql/history",
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/sql",
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/database/import",
-      "/Volumes/2TB/code/npm-packages/postbasejs/src"
+      "/Volumes/2TB/code/npm-packages/postbasejs/src",
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/email/v1/[projectId]"
     ]
   }
 }

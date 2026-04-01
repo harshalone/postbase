@@ -402,7 +402,8 @@ export default function StorageBrowserPage({
       setActiveFile(null);
       try {
         const res = await fetch(
-          `/api/dashboard/${projectId}/storage/${connectionId}/browse?prefix=${encodeURIComponent(p)}`
+          `/api/dashboard/${projectId}/storage/${connectionId}/browse?prefix=${encodeURIComponent(p)}`,
+          { cache: "no-store" }
         );
         const data = await res.json();
         if (data.error) {

@@ -179,11 +179,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
     if (isOtp) {
       htmlBody = htmlBody
-        ? htmlBody.replace(/\{\{code\}\}/g, token).replace(/\{\{email\}\}/g, email).replace(/\{\{expires_in\}\}/g, "10 minutes")
+        ? htmlBody.replace(/\{\{code\}\}/g, token).replace(/\{\{email\}\}/g, email).replace(/\{\{expires_in\}\}/g, "10 minutes").replace(/\{\{name\}\}/g, "")
         : `<p>Your verification code is: <strong>${token}</strong></p><p>This code expires in 10 minutes.</p>`;
     } else {
       htmlBody = htmlBody
-        ? htmlBody.replace("{{magic_link}}", magicLink).replace("{{email}}", email)
+        ? htmlBody.replace(/\{\{magic_link\}\}/g, magicLink).replace(/\{\{email\}\}/g, email).replace(/\{\{name\}\}/g, "")
         : `<p>Click <a href="${magicLink}">here</a> to sign in.</p>`;
     }
 
