@@ -94,7 +94,7 @@ const TABS = [
   },
 ];
 
-const SAMPLE_VARS: Record<string, string> = {
+const DEFAULT_FALLBACKS: Record<string, string> = {
   "{{name}}": "Alex Johnson",
   "{{email}}": "alex@example.com",
   "{{magic_link}}": "https://yourapp.com/auth/verify?token=abc123",
@@ -102,10 +102,13 @@ const SAMPLE_VARS: Record<string, string> = {
   "{{expires_in}}": "15 minutes",
 };
 
-function resolvePreview(html: string): string {
+// Variables that are always provided by the system — fallbacks not applicable
+const REQUIRED_VARS = new Set(["{{magic_link}}", "{{code}}"]);
+
+function resolvePreview(html: string, fallbacks: Record<string, string>): string {
   let result = html;
-  for (const [key, val] of Object.entries(SAMPLE_VARS)) {
-    result = result.replaceAll(key, val);
+  for (const [key, val] of Object.entries(fallbacks)) {
+    if (val) result = result.replaceAll(key, val);
   }
   return result;
 }
@@ -123,6 +126,9 @@ function TemplateEditor({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [mode, setMode] = useState<"edit" | "preview">("edit");
+  const [fallbacks, setFallbacks] = useState<Record<string, string>>(
+    () => ({ ...DEFAULT_FALLBACKS })
+  );
 
   useEffect(() => {
     setLoading(true);
@@ -158,6 +164,10 @@ function TemplateEditor({
   function reset() {
     setSubject(DEFAULTS[type].subject);
     setBody(DEFAULTS[type].body);
+  }
+
+  function setFallback(variable: string, value: string) {
+    setFallbacks((prev) => ({ ...prev, [variable]: value }));
   }
 
   if (loading) {
@@ -223,14 +233,11 @@ function TemplateEditor({
           <div className="rounded-md border border-zinc-700 overflow-hidden">
             <div className="bg-zinc-800/60 border-b border-zinc-700 px-3 py-1.5 flex items-center gap-2">
               <span className="text-[11px] text-zinc-500">
-                Sample data applied —{" "}
-                <span className="text-zinc-400">
-                  {Object.keys(SAMPLE_VARS).join(", ")}
-                </span>
+                Preview with fallback values applied
               </span>
             </div>
             <iframe
-              srcDoc={resolvePreview(body)}
+              srcDoc={resolvePreview(body, fallbacks)}
               title="Email preview"
               className="w-full bg-white"
               style={{ height: 480, border: "none" }}
@@ -240,18 +247,42 @@ function TemplateEditor({
         )}
       </div>
 
-      {/* Variables reference */}
+      {/* Variable fallbacks */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <p className="text-xs text-zinc-500 font-medium mb-2">Available variables:</p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-          {TEMPLATE_VARS[type].map((v) => (
-            <div key={v.var} className="flex items-center gap-2">
-              <code className="text-xs text-brand-400 bg-brand-950/30 px-1.5 py-0.5 rounded font-mono">
-                {v.var}
-              </code>
-              <span className="text-xs text-zinc-600 truncate">{v.description}</span>
-            </div>
-          ))}
+        <div className="mb-3">
+          <p className="text-xs text-zinc-300 font-medium">Variable fallbacks</p>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            Set preview values for dynamic variables. Required variables are provided
+            automatically at send time.
+          </p>
+        </div>
+        <div className="space-y-2.5">
+          {TEMPLATE_VARS[type].map((v) => {
+            const isRequired = REQUIRED_VARS.has(v.var);
+            return (
+              <div key={v.var} className="grid grid-cols-[140px_1fr] items-center gap-3">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <code className="text-xs text-brand-400 bg-brand-950/30 px-1.5 py-0.5 rounded font-mono truncate">
+                    {v.var}
+                  </code>
+                  {isRequired && (
+                    <span className="text-[10px] text-zinc-600 shrink-0">required</span>
+                  )}
+                </div>
+                {isRequired ? (
+                  <p className="text-xs text-zinc-600 italic">{v.description}</p>
+                ) : (
+                  <input
+                    type="text"
+                    value={fallbacks[v.var] ?? ""}
+                    onChange={(e) => setFallback(v.var, e.target.value)}
+                    placeholder={`Fallback for ${v.var} — leave empty to show blank`}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-brand-500"
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
