@@ -34,6 +34,7 @@ import {
   Check,
   Copy,
   AlertTriangle,
+  Upload,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -338,6 +339,16 @@ export default function DatabasePage({
   const [editRowData, setEditRowData] = useState<Record<string, unknown> | null>(null);
   const [editRowValues, setEditRowValues] = useState<Record<string, string>>({});
   const [editRowLoading, setEditRowLoading] = useState(false);
+
+  // Import SQL panel
+  const importSqlPanel = useSlidePanel();
+  const showImportSql = importSqlPanel.visible;
+  const [importSqlContent, setImportSqlContent] = useState("");
+  const [importSqlFileName, setImportSqlFileName] = useState<string | null>(null);
+  const [importSqlDragging, setImportSqlDragging] = useState(false);
+  const [importSqlRunning, setImportSqlRunning] = useState(false);
+  const [importSqlResult, setImportSqlResult] = useState<{ success: boolean; message: string } | null>(null);
+  const importSqlInputRef = useRef<HTMLInputElement>(null);
 
   // ─── Data fetchers ──────────────────────────────────────────────────────────
 
@@ -839,6 +850,44 @@ export default function DatabasePage({
     fetchRls();
   }
 
+  // ─── Import SQL handlers ──────────────────────────────────────────────────────
+
+  function handleImportSqlFile(file: File) {
+    if (!file.name.endsWith(".sql") && file.type !== "text/plain") {
+      toast.error("Please select a .sql file");
+      return;
+    }
+    setImportSqlFileName(file.name);
+    setImportSqlResult(null);
+    const reader = new FileReader();
+    reader.onload = (e) => setImportSqlContent((e.target?.result as string) ?? "");
+    reader.readAsText(file);
+  }
+
+  async function runImportSql() {
+    if (!importSqlContent.trim()) return;
+    setImportSqlRunning(true);
+    setImportSqlResult(null);
+    try {
+      const res = await fetch(`/api/dashboard/${projectId}/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: importSqlContent }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setImportSqlResult({ success: false, message: data.error });
+      } else {
+        setImportSqlResult({ success: true, message: `SQL executed successfully. Command: ${data.command ?? "OK"}` });
+        fetchTables();
+      }
+    } catch (err) {
+      setImportSqlResult({ success: false, message: err instanceof Error ? err.message : "Unknown error" });
+    } finally {
+      setImportSqlRunning(false);
+    }
+  }
+
   // ─── Derived ─────────────────────────────────────────────────────────────────
 
   const selectedTableMeta = tables.find((t) => t.table_name === selectedTable);
@@ -863,7 +912,16 @@ export default function DatabasePage({
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-6 h-14 border-b border-zinc-800 shrink-0">
-        <h1 className="text-sm font-semibold text-white">Database</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-sm font-semibold text-white">Database</h1>
+          <button
+            onClick={() => { setImportSqlContent(""); setImportSqlFileName(null); setImportSqlResult(null); importSqlPanel.open(); }}
+            className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
+          >
+            <Upload size={12} />
+            Import SQL
+          </button>
+        </div>
         <div className="flex items-center gap-1">
           {(
             [
@@ -2799,6 +2857,126 @@ with check (
               <button onClick={saveEditRow} disabled={editRowLoading}
                 className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors">
                 {editRowLoading ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Import SQL Slideover ── */}
+      {showImportSql && (
+        <>
+          <div
+            className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${importSqlPanel.closing ? "closing" : ""}`}
+            onClick={() => importSqlPanel.close()}
+          />
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[560px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${importSqlPanel.closing ? "closing" : ""}`}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+              <div>
+                <p className="text-sm font-semibold text-white">Import SQL</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Upload a .sql file to create tables, indexes, or run any SQL</p>
+              </div>
+              <button
+                onClick={() => importSqlPanel.close()}
+                className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto flex flex-col gap-4 p-6">
+
+              {/* Drop zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); setImportSqlDragging(true); }}
+                onDragLeave={() => setImportSqlDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setImportSqlDragging(false);
+                  const file = e.dataTransfer.files[0];
+                  if (file) handleImportSqlFile(file);
+                }}
+                onClick={() => importSqlInputRef.current?.click()}
+                className={`cursor-pointer flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl py-10 transition-colors ${
+                  importSqlDragging
+                    ? "border-brand-500 bg-brand-500/5"
+                    : "border-zinc-700 hover:border-zinc-500 bg-zinc-900/40"
+                }`}
+              >
+                <Upload size={24} className="text-zinc-500" />
+                <div className="text-center">
+                  <p className="text-sm text-zinc-300">
+                    {importSqlFileName ?? "Drop a .sql file here or click to browse"}
+                  </p>
+                  {!importSqlFileName && (
+                    <p className="text-xs text-zinc-600 mt-1">Supports .sql files</p>
+                  )}
+                </div>
+                {importSqlFileName && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setImportSqlFileName(null); setImportSqlContent(""); setImportSqlResult(null); }}
+                    className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 underline"
+                  >
+                    Remove file
+                  </button>
+                )}
+                <input
+                  ref={importSqlInputRef}
+                  type="file"
+                  accept=".sql,text/plain"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportSqlFile(f); e.target.value = ""; }}
+                />
+              </div>
+
+              {/* SQL preview / editor */}
+              {importSqlContent && (
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs text-zinc-400 font-medium">SQL Preview / Edit</label>
+                  <textarea
+                    value={importSqlContent}
+                    onChange={(e) => setImportSqlContent(e.target.value)}
+                    rows={12}
+                    spellCheck={false}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono placeholder-zinc-600 focus:outline-none focus:border-brand-500 resize-y"
+                  />
+                </div>
+              )}
+
+              {/* Result */}
+              {importSqlResult && (
+                <div className={`flex items-start gap-3 rounded-lg px-4 py-3 text-sm border ${
+                  importSqlResult.success
+                    ? "bg-green-950/40 border-green-800/50 text-green-300"
+                    : "bg-red-950/40 border-red-800/50 text-red-300"
+                }`}>
+                  {importSqlResult.success
+                    ? <Check size={14} className="mt-0.5 shrink-0" />
+                    : <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  }
+                  <span className="break-words">{importSqlResult.message}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
+              <button
+                onClick={() => importSqlPanel.close()}
+                className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={runImportSql}
+                disabled={!importSqlContent.trim() || importSqlRunning}
+                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
+              >
+                <Upload size={14} />
+                {importSqlRunning ? "Running…" : "Run SQL"}
               </button>
             </div>
           </div>
