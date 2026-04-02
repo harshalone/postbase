@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { projects, storageConnections } from "@/lib/db/schema";
+import { projects, storageConnections, storageBuckets } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 
 const createSchema = z.object({
@@ -31,24 +31,38 @@ export async function GET(
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const connections = await db
-    .select({
-      id: storageConnections.id,
-      name: storageConnections.name,
-      provider: storageConnections.provider,
-      bucket: storageConnections.bucket,
-      region: storageConnections.region,
-      endpoint: storageConnections.endpoint,
-      accessKeyId: storageConnections.accessKeyId,
-      isDefault: storageConnections.isDefault,
-      createdAt: storageConnections.createdAt,
-      updatedAt: storageConnections.updatedAt,
-    })
-    .from(storageConnections)
-    .where(eq(storageConnections.projectId, projectId))
-    .orderBy(storageConnections.createdAt);
+  const [connections, buckets] = await Promise.all([
+    db
+      .select({
+        id: storageConnections.id,
+        name: storageConnections.name,
+        provider: storageConnections.provider,
+        bucket: storageConnections.bucket,
+        region: storageConnections.region,
+        endpoint: storageConnections.endpoint,
+        accessKeyId: storageConnections.accessKeyId,
+        isDefault: storageConnections.isDefault,
+        createdAt: storageConnections.createdAt,
+        updatedAt: storageConnections.updatedAt,
+      })
+      .from(storageConnections)
+      .where(eq(storageConnections.projectId, projectId))
+      .orderBy(storageConnections.createdAt),
+    db
+      .select({
+        id: storageBuckets.id,
+        name: storageBuckets.name,
+        public: storageBuckets.public,
+        fileSizeLimit: storageBuckets.fileSizeLimit,
+        allowedMimeTypes: storageBuckets.allowedMimeTypes,
+        createdAt: storageBuckets.createdAt,
+      })
+      .from(storageBuckets)
+      .where(eq(storageBuckets.projectId, projectId))
+      .orderBy(storageBuckets.createdAt),
+  ]);
 
-  return Response.json({ connections });
+  return Response.json({ connections, buckets });
 }
 
 export async function POST(
@@ -107,6 +121,26 @@ export async function POST(
       createdAt: storageConnections.createdAt,
       updatedAt: storageConnections.updatedAt,
     });
+
+  // Auto-register the bucket in storageBuckets if not already present
+  const [existingBucket] = await db
+    .select({ id: storageBuckets.id })
+    .from(storageBuckets)
+    .where(
+      and(
+        eq(storageBuckets.projectId, projectId),
+        eq(storageBuckets.name, rest.bucket)
+      )
+    )
+    .limit(1);
+
+  if (!existingBucket) {
+    await db.insert(storageBuckets).values({
+      projectId,
+      name: rest.bucket,
+      public: false,
+    });
+  }
 
   return Response.json({ connection }, { status: 201 });
 }

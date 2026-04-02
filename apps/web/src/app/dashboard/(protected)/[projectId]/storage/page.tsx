@@ -19,6 +19,9 @@ import {
   Copy,
   Check,
   FolderOpen,
+  Database,
+  Lock,
+  Globe,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -36,6 +39,22 @@ type StorageConnection = {
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+type StorageBucket = {
+  id: string;
+  name: string;
+  public: boolean;
+  fileSizeLimit: number | null;
+  allowedMimeTypes: string[] | null;
+  createdAt: string;
+};
+
+type BucketFormState = {
+  name: string;
+  public: boolean;
+  fileSizeLimit: string;
+  allowedMimeTypes: string;
 };
 
 type FormState = {
@@ -722,6 +741,236 @@ function ConnectionForm({
   );
 }
 
+// ─── Bucket row ───────────────────────────────────────────────────────────────
+
+function BucketRow({
+  bucket,
+  onEdit,
+  onDelete,
+}: {
+  bucket: StorageBucket;
+  onEdit: (b: StorageBucket) => void;
+  onDelete: (b: StorageBucket) => void;
+}) {
+  return (
+    <tr className="border-b border-zinc-800 hover:bg-zinc-800/40 transition-colors group">
+      <td className="px-6 py-4">
+        <div className="flex items-center gap-2">
+          <Database size={14} className="text-zinc-500 shrink-0" />
+          <span className="text-sm font-mono text-white">{bucket.name}</span>
+        </div>
+      </td>
+      <td className="px-6 py-4">
+        {bucket.public ? (
+          <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
+            <Globe size={11} />
+            Public
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-xs text-zinc-500">
+            <Lock size={11} />
+            Private
+          </span>
+        )}
+      </td>
+      <td className="px-6 py-4">
+        <span className="text-xs text-zinc-500">
+          {bucket.fileSizeLimit
+            ? `${(bucket.fileSizeLimit / 1024 / 1024).toFixed(0)} MB`
+            : "Unlimited"}
+        </span>
+      </td>
+      <td className="px-6 py-4">
+        <span className="text-xs text-zinc-500">
+          {bucket.allowedMimeTypes?.length
+            ? bucket.allowedMimeTypes.join(", ")
+            : "All types"}
+        </span>
+      </td>
+      <td className="px-6 py-4 text-right">
+        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={() => onEdit(bucket)}
+            className="cursor-pointer p-1.5 rounded text-zinc-600 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            onClick={() => onDelete(bucket)}
+            className="cursor-pointer p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Bucket slide panel (add + edit) ──────────────────────────────────────────
+
+const BLANK_BUCKET_FORM: BucketFormState = {
+  name: "",
+  public: false,
+  fileSizeLimit: "",
+  allowedMimeTypes: "",
+};
+
+function BucketSlidePanel({
+  visible,
+  closing,
+  editTarget,
+  pendingForm,
+  onChange,
+  onClose,
+  onSave,
+  saving,
+}: {
+  visible: boolean;
+  closing: boolean;
+  editTarget: StorageBucket | null;
+  pendingForm: BucketFormState;
+  onChange: (f: BucketFormState) => void;
+  onClose: () => void;
+  onSave: () => void;
+  saving: boolean;
+}) {
+  if (!visible) return null;
+
+  function set<K extends keyof BucketFormState>(key: K, value: BucketFormState[K]) {
+    onChange({ ...pendingForm, [key]: value });
+  }
+
+  const isEdit = editTarget !== null;
+
+  return (
+    <>
+      <div
+        className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/50 ${closing ? "closing" : ""}`}
+        onClick={onClose}
+      />
+      <div
+        className={`slide-panel fixed inset-y-0 right-0 z-50 w-[480px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${closing ? "closing" : ""}`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+          <div>
+            <h2 className="text-base font-semibold text-white">
+              {isEdit ? "Edit Bucket" : "New Bucket"}
+            </h2>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {isEdit
+                ? `Editing ${editTarget.name}`
+                : "Register a logical bucket to organize your files"}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {/* Name — read-only when editing */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">
+              Bucket name
+              {!isEdit && <span className="text-zinc-600 ml-1">(required)</span>}
+            </label>
+            {isEdit ? (
+              <div className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm font-mono text-zinc-400">
+                {editTarget.name}
+              </div>
+            ) : (
+              <input
+                value={pendingForm.name}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="my-bucket"
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+              />
+            )}
+          </div>
+
+          {/* Public toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <div
+              onClick={() => set("public", !pendingForm.public)}
+              className={`relative w-9 h-5 rounded-full transition-colors ${
+                pendingForm.public ? "bg-brand-500" : "bg-zinc-700"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  pendingForm.public ? "translate-x-4" : "translate-x-0"
+                }`}
+              />
+            </div>
+            <div>
+              <p className="text-sm text-zinc-300">Public bucket</p>
+              <p className="text-xs text-zinc-600">
+                Files are accessible without authentication
+              </p>
+            </div>
+          </label>
+
+          {/* File size limit */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">
+              Max file size (MB)
+              <span className="text-zinc-600 ml-1">(optional, leave blank for unlimited)</span>
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={pendingForm.fileSizeLimit}
+              onChange={(e) => set("fileSizeLimit", e.target.value)}
+              placeholder="e.g. 50"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+
+          {/* Allowed MIME types */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">
+              Allowed MIME types
+              <span className="text-zinc-600 ml-1">(optional, comma-separated)</span>
+            </label>
+            <input
+              value={pendingForm.allowedMimeTypes}
+              onChange={(e) => set("allowedMimeTypes", e.target.value)}
+              placeholder="image/png, image/jpeg, application/pdf"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
+          <button
+            onClick={onClose}
+            className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSave}
+            disabled={saving || (!isEdit && !pendingForm.name.trim())}
+            className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            {saving
+              ? isEdit ? "Saving…" : "Creating…"
+              : isEdit ? "Save Changes" : "Create Bucket"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function StoragePage({
@@ -733,15 +982,19 @@ export default function StoragePage({
   const router = useRouter();
   const toast = useToast();
   const formPanel = useSlidePanel();
+  const bucketPanel = useSlidePanel();
 
   const [connections, setConnections] = useState<StorageConnection[]>([]);
+  const [buckets, setBuckets] = useState<StorageBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [editTarget, setEditTarget] = useState<StorageConnection | null>(null);
+  const [editBucketTarget, setEditBucketTarget] = useState<StorageBucket | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingBucket, setSavingBucket] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<StorageConnection | null>(
-    null
-  );
+  const [deleteConfirm, setDeleteConfirm] = useState<StorageConnection | null>(null);
+  const [deleteBucketConfirm, setDeleteBucketConfirm] = useState<StorageBucket | null>(null);
+  const [pendingBucketForm, setPendingBucketForm] = useState<BucketFormState>(BLANK_BUCKET_FORM);
   const [formKey, setFormKey] = useState(0);
 
   const fetchConnections = useCallback(async () => {
@@ -750,6 +1003,7 @@ export default function StoragePage({
       const res = await fetch(`/api/dashboard/${projectId}/storage`);
       const data = await res.json();
       setConnections(data.connections ?? []);
+      setBuckets(data.buckets ?? []);
     } finally {
       setLoading(false);
     }
@@ -867,6 +1121,96 @@ export default function StoragePage({
     fetchConnections();
   }
 
+  function openNewBucket() {
+    setEditBucketTarget(null);
+    setPendingBucketForm(BLANK_BUCKET_FORM);
+    bucketPanel.open();
+  }
+
+  function openEditBucket(bucket: StorageBucket) {
+    setEditBucketTarget(bucket);
+    setPendingBucketForm({
+      name: bucket.name,
+      public: bucket.public,
+      fileSizeLimit: bucket.fileSizeLimit
+        ? String(Math.round(bucket.fileSizeLimit / 1024 / 1024))
+        : "",
+      allowedMimeTypes: bucket.allowedMimeTypes?.join(", ") ?? "",
+    });
+    bucketPanel.open();
+  }
+
+  function closeBucketPanel() {
+    bucketPanel.close();
+    setEditBucketTarget(null);
+  }
+
+  async function handleSaveBucket() {
+    setSavingBucket(true);
+    const form = pendingBucketForm;
+    const mimeTypes = form.allowedMimeTypes
+      ? form.allowedMimeTypes.split(",").map((s) => s.trim()).filter(Boolean)
+      : null;
+    const fileSizeLimit = form.fileSizeLimit
+      ? parseInt(form.fileSizeLimit, 10) * 1024 * 1024
+      : null;
+
+    try {
+      if (editBucketTarget) {
+        const res = await fetch(`/api/dashboard/${projectId}/storage/buckets`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: editBucketTarget.id,
+            public: form.public,
+            fileSizeLimit,
+            allowedMimeTypes: mimeTypes,
+          }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          toast.error(typeof data.error === "string" ? data.error : JSON.stringify(data.error));
+          return;
+        }
+      } else {
+        const res = await fetch(`/api/dashboard/${projectId}/storage/buckets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            public: form.public,
+            fileSizeLimit,
+            allowedMimeTypes: mimeTypes,
+          }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          toast.error(typeof data.error === "string" ? data.error : JSON.stringify(data.error));
+          return;
+        }
+      }
+      bucketPanel.close();
+      setEditBucketTarget(null);
+      fetchConnections();
+    } finally {
+      setSavingBucket(false);
+    }
+  }
+
+  async function handleDeleteBucket(bucket: StorageBucket) {
+    const res = await fetch(
+      `/api/dashboard/${projectId}/storage/buckets?id=${bucket.id}`,
+      { method: "DELETE" }
+    );
+    const data = await res.json();
+    if (data.error) {
+      toast.error(data.error);
+      return;
+    }
+    setDeleteBucketConfirm(null);
+    fetchConnections();
+  }
+
   function openAdd() {
     setEditTarget(null);
     setPendingForm(BLANK_FORM);
@@ -978,6 +1322,68 @@ export default function StoragePage({
           </div>
         )}
 
+        {/* ── Buckets section ── */}
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-semibold text-white">Buckets</h2>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Logical buckets registered in Postbase. Used by the SDK to organize and access files.
+              </p>
+            </div>
+            <button
+              onClick={openNewBucket}
+              className="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors"
+            >
+              <Plus size={12} />
+              New Bucket
+            </button>
+          </div>
+
+          {loading ? null : buckets.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-900/50 px-6 py-10 flex flex-col items-center text-center">
+              <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center mb-3">
+                <Database size={18} className="text-zinc-500" />
+              </div>
+              <p className="text-sm font-medium text-zinc-300 mb-1">No buckets registered</p>
+              <p className="text-xs text-zinc-500 max-w-xs">
+                Buckets are auto-created when you add a storage connection. You can also create them manually for additional organization.
+              </p>
+              <button
+                onClick={openNewBucket}
+                className="cursor-pointer mt-4 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition-colors"
+              >
+                <Plus size={12} />
+                Create a bucket
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
+                    <th className="text-left px-6 py-3 font-medium">Name</th>
+                    <th className="text-left px-6 py-3 font-medium">Access</th>
+                    <th className="text-left px-6 py-3 font-medium">Max size</th>
+                    <th className="text-left px-6 py-3 font-medium">Allowed types</th>
+                    <th className="px-6 py-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {buckets.map((bucket) => (
+                    <BucketRow
+                      key={bucket.id}
+                      bucket={bucket}
+                      onEdit={openEditBucket}
+                      onDelete={(b) => setDeleteBucketConfirm(b)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
         {/* Testing indicator */}
         {testing && (
           <div className="fixed bottom-6 right-6 flex items-center gap-3 px-4 py-3 rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl z-50">
@@ -1054,6 +1460,52 @@ export default function StoragePage({
             </div>
           </div>
         </>
+      )}
+
+      {/* ── Bucket slide panel (add + edit) ── */}
+      <BucketSlidePanel
+        visible={bucketPanel.visible}
+        closing={bucketPanel.closing}
+        editTarget={editBucketTarget}
+        pendingForm={pendingBucketForm}
+        onChange={setPendingBucketForm}
+        onClose={closeBucketPanel}
+        onSave={handleSaveBucket}
+        saving={savingBucket}
+      />
+
+      {/* ── Delete bucket confirm ── */}
+      {deleteBucketConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-sm mx-4 shadow-2xl">
+            <div className="px-6 py-5">
+              <h2 className="text-base font-semibold text-white mb-2">
+                Delete bucket?
+              </h2>
+              <p className="text-sm text-zinc-400">
+                This will remove{" "}
+                <span className="text-white font-mono font-medium">
+                  {deleteBucketConfirm.name}
+                </span>{" "}
+                from Postbase. Files stored on your provider are unaffected.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800">
+              <button
+                onClick={() => setDeleteBucketConfirm(null)}
+                className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteBucket(deleteBucketConfirm)}
+                className="cursor-pointer px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Delete confirm dialog ── */}

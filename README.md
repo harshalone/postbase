@@ -10,6 +10,8 @@ Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/postbase-v001?referralCode=lonare&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/q3BoFA?referralCode=lonare&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
 ---
 
 ## Screenshots
