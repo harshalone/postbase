@@ -46,7 +46,18 @@ export default async function UsersPage({
       await ensureProjectAuthTables(client, schema);
 
       const countResult = await client.query(`SELECT COUNT(*)::int AS total FROM "${schema}"."users"`);
-      const usersResult = await client.query(`SELECT * FROM "${schema}"."users" ORDER BY "created_at" LIMIT 50`);
+      const usersResult = await client.query(
+        `SELECT u.*,
+                COALESCE(
+                  json_agg(a.provider ORDER BY a.provider) FILTER (WHERE a.provider IS NOT NULL),
+                  '[]'
+                ) AS providers
+         FROM "${schema}"."users" u
+         LEFT JOIN "${schema}"."accounts" a ON a.user_id = u.id
+         GROUP BY u.id
+         ORDER BY u.created_at
+         LIMIT 50`
+      );
       const colsResult = await client.query(
         `SELECT column_name, data_type FROM information_schema.columns
          WHERE table_schema = $1 AND table_name = 'users'
@@ -66,6 +77,7 @@ export default async function UsersPage({
         isAnonymous: u.is_anonymous,
         bannedAt: u.banned_at ? new Date(u.banned_at).toISOString() : null,
         metadata: u.metadata ?? {},
+        providers: u.providers as string[],
         createdAt: new Date(u.created_at).toISOString(),
         updatedAt: new Date(u.updated_at).toISOString(),
       }));

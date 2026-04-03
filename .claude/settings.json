@@ -114,7 +114,14 @@
       "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/tables -type f -name \"*.tsx\" -o -name \"*.ts\")",
       "Bash(grep -n \"uuid\\\\|user_uid\\\\|column\\\\|cell\\\\|row\" /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/database/tables/page.tsx)",
       "Bash(find /Volumes/2TB/code/postbase.com/apps/web/src -type f \\\\\\(-name *table* -o -name *grid* -o -name *data* \\\\\\) -name *.tsx)",
-      "Bash(ls -la /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/users/_components/)"
+      "Bash(ls -la /Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/[projectId]/users/_components/)",
+      "Read(//Volumes/2TB/code/emaildatingonline.com/app/login/**)",
+      "Read(//Volumes/2TB/code/emaildatingonline.com/**)",
+      "Bash(npm run:*)",
+      "Bash(grep -r \"AUTH_SECRET\\\\|NEXTAUTH_SECRET\\\\|NEXTAUTH_URL\\\\|AUTH_URL\" /Volumes/2TB/code/postbase.com/apps/web/.env*)",
+      "Bash(grep -r \"AUTH_SECRET\\\\|NEXTAUTH_SECRET\" /Volumes/2TB/code/postbase.com/.env*)",
+      "Bash(npm version:*)",
+      "Bash(npm publish:*)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",

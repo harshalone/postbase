@@ -24,6 +24,7 @@ export interface DashboardUser {
   isAnonymous: boolean | null;
   bannedAt: string | null;
   metadata: Record<string, unknown>;
+  providers: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -437,6 +438,7 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
               <th className="text-left px-4 py-3 font-medium whitespace-nowrap">Verified {LOCKED_BADGE}</th>
               <th className="text-left px-4 py-3 font-medium whitespace-nowrap">Created {LOCKED_BADGE}</th>
               <th className="text-left px-4 py-3 font-medium whitespace-nowrap">Status {LOCKED_BADGE}</th>
+              <th className="text-left px-4 py-3 font-medium whitespace-nowrap">Providers {LOCKED_BADGE}</th>
 
               {columns.map((col) => (
                 <th key={col.key} className="text-left px-4 py-3 font-medium whitespace-nowrap">
@@ -513,6 +515,19 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
                     ) : (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-emerald-900/30 text-emerald-400 border border-emerald-800/40">Active</span>
                     )}
+                  </td>
+
+                  {/* Providers — locked */}
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {user.providers.length === 0 ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-zinc-800 text-zinc-500 border border-zinc-700">Email</span>
+                      ) : (
+                        user.providers.map((p) => (
+                          <span key={p} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-blue-900/30 text-blue-300 border border-blue-800/40 capitalize">{p}</span>
+                        ))
+                      )}
+                    </div>
                   </td>
 
                   {/* Custom columns — editable */}

@@ -12,16 +12,33 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
-async function getHandler(req: NextRequest, context: { params: Promise<{ projectId: string }> }) {
-  const { projectId } = await context.params;
+function corsHeaders(req: NextRequest) {
+  const origin = req.headers.get("origin") ?? "*";
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Credentials": "true",
+  };
+}
 
-  // Verify project exists
+export async function OPTIONS(req: NextRequest) {
+  return new Response(null, { status: 204, headers: corsHeaders(req) });
+}
+
+async function getProject(projectId: string) {
   const [project] = await db
     .select()
     .from(projects)
     .where(eq(projects.id, projectId))
     .limit(1);
+  return project;
+}
 
+async function getHandler(req: NextRequest, context: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await context.params;
+
+  const project = await getProject(projectId);
   if (!project) {
     return new Response(JSON.stringify({ error: "Project not found" }), {
       status: 404,
@@ -33,18 +50,19 @@ async function getHandler(req: NextRequest, context: { params: Promise<{ project
   const config = await buildAuthConfig(projectId, enabledProviders);
 
   const { handlers } = NextAuth(config);
-  return handlers.GET(req);
+  const res = await handlers.GET(req);
+
+  const headers = new Headers(res.headers);
+  for (const [key, value] of Object.entries(corsHeaders(req))) {
+    headers.set(key, value);
+  }
+  return new Response(res.body, { status: res.status, headers });
 }
 
 async function postHandler(req: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await context.params;
 
-  const [project] = await db
-    .select()
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-
+  const project = await getProject(projectId);
   if (!project) {
     return new Response(JSON.stringify({ error: "Project not found" }), {
       status: 404,
@@ -56,7 +74,13 @@ async function postHandler(req: NextRequest, context: { params: Promise<{ projec
   const config = await buildAuthConfig(projectId, enabledProviders);
 
   const { handlers } = NextAuth(config);
-  return handlers.POST(req);
+  const res = await handlers.POST(req);
+
+  const headers = new Headers(res.headers);
+  for (const [key, value] of Object.entries(corsHeaders(req))) {
+    headers.set(key, value);
+  }
+  return new Response(res.body, { status: res.status, headers });
 }
 
 export { getHandler as GET, postHandler as POST };

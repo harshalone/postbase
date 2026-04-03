@@ -36,7 +36,16 @@ export async function GET(
       `SELECT COUNT(*)::int AS total FROM "${schema}"."users"`
     );
     const { rows } = await client.query(
-      `SELECT * FROM "${schema}"."users" ORDER BY "created_at" LIMIT $1 OFFSET $2`,
+      `SELECT u.*,
+              COALESCE(
+                json_agg(a.provider ORDER BY a.provider) FILTER (WHERE a.provider IS NOT NULL),
+                '[]'
+              ) AS providers
+       FROM "${schema}"."users" u
+       LEFT JOIN "${schema}"."accounts" a ON a.user_id = u.id
+       GROUP BY u.id
+       ORDER BY u.created_at
+       LIMIT $1 OFFSET $2`,
       [perPage, offset]
     );
 
@@ -50,6 +59,7 @@ export async function GET(
       isAnonymous: u.is_anonymous,
       bannedAt: u.banned_at ? new Date(u.banned_at).toISOString() : null,
       metadata: u.metadata ?? {},
+      providers: u.providers as string[],
       createdAt: new Date(u.created_at).toISOString(),
       updatedAt: new Date(u.updated_at).toISOString(),
     }));

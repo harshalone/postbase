@@ -21,6 +21,8 @@ import {
   Lock,
   Pencil,
   Trash2,
+  Info,
+  AlertTriangle,
 } from "lucide-react";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
@@ -97,6 +99,13 @@ export default function SqlEditorPage({
   // Copied state for export
   const [exported, setExported] = useState(false);
 
+  // Destructive command confirmation modal
+  const [confirmModal, setConfirmModal] = useState(false);
+  const [pendingSql, setPendingSql] = useState<string | null>(null);
+
+  // Info banner visibility
+  const [showInfo, setShowInfo] = useState(true);
+
   // Resizable results panel
   const [resultsHeight, setResultsHeight] = useState(260);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -166,11 +175,19 @@ export default function SqlEditorPage({
     setTabs((prev) => prev.map((t) => (t.id === activeId ? { ...t, sql } : t)));
   }
 
+  // ─── Destructive check ─────────────────────────────────────────────────────
+
+  function isDestructive(sql: string): boolean {
+    const normalized = sql.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "").trim().toUpperCase();
+    if (/^\s*(DROP|TRUNCATE)\b/.test(normalized)) return true;
+    // DELETE without WHERE clause
+    if (/^\s*DELETE\s+FROM\b/.test(normalized) && !/\bWHERE\b/.test(normalized)) return true;
+    return false;
+  }
+
   // ─── Run / Explain ─────────────────────────────────────────────────────────
 
-  const runQuery = useCallback(async () => {
-    const sql = activeTab.sql.trim();
-    if (!sql) return;
+  const executeQuery = useCallback(async (sql: string) => {
     setRunning(true);
     setResults((r) => ({ ...r, [activeId]: null }));
     setExplainResult(null);
@@ -196,7 +213,6 @@ export default function SqlEditorPage({
         const data = await res.json();
         setResults((r) => ({ ...r, [activeId]: data }));
       }
-      // Auto-save to history (fire-and-forget, update local state)
       const saveRes = await fetch(`/api/dashboard/${projectId}/sql/history`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -209,7 +225,18 @@ export default function SqlEditorPage({
     } finally {
       setRunning(false);
     }
-  }, [activeTab.sql, activeId, projectId, resultTab]);
+  }, [activeId, projectId, resultTab]);
+
+  const runQuery = useCallback(async () => {
+    const sql = activeTab.sql.trim();
+    if (!sql) return;
+    if (isDestructive(sql)) {
+      setPendingSql(sql);
+      setConfirmModal(true);
+      return;
+    }
+    await executeQuery(sql);
+  }, [activeTab.sql, executeQuery]);
 
   // ─── History actions ───────────────────────────────────────────────────────
 
@@ -300,16 +327,27 @@ export default function SqlEditorPage({
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-zinc-950">
-      {/* Page header */}
-      <div className="flex items-center px-6 h-14 border-b border-zinc-800 shrink-0">
-        <h1 className="text-sm font-semibold text-white">SQL Editor</h1>
-      </div>
+    <div className="flex flex-col h-full overflow-hidden bg-zinc-950 relative">
+      {/* ── Navbar info banner (absolutely positioned over the page header) ── */}
+      {showInfo && (
+        <div className="absolute top-0 left-0 right-0 z-30 flex items-center gap-3 px-5 h-14 bg-blue-950/95 backdrop-blur-sm border-b border-blue-900/60">
+          <Info size={12} className="text-blue-400 shrink-0" />
+          <p className="flex-1 text-xs text-blue-300/90 leading-relaxed truncate">
+            <span className="font-medium text-blue-200">Schema-aware SQL runner — </span>
+            Queries use <code className="text-blue-300 bg-blue-900/50 px-1 rounded">search_path</code> so unqualified tables work.{" "}
+            <span className="text-yellow-300/80">Trigger bodies</span> run on a separate connection — the editor auto-injects <code className="text-blue-300 bg-blue-900/50 px-1 rounded">SET search_path</code> into function bodies, or use <code className="text-blue-300 bg-blue-900/50 px-1 rounded">TG_TABLE_SCHEMA</code> with <code className="text-blue-300 bg-blue-900/50 px-1 rounded">EXECUTE format()</code>.
+          </p>
+          <button onClick={() => setShowInfo(false)} className="cursor-pointer text-blue-500 hover:text-blue-300 shrink-0 transition-colors">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
       {/* ── Left Sidebar ── */}
       <aside className="w-[180px] shrink-0 border-r border-zinc-800 flex flex-col bg-zinc-950">
         {/* Search */}
-        <div className="px-3 py-2 border-b border-zinc-800">
+        <div className="px-3 border-b border-zinc-800 h-14 flex items-center">
           <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
             <Search size={11} className="text-zinc-600 shrink-0" />
             <input
@@ -694,6 +732,45 @@ export default function SqlEditorPage({
           )}
         </div>
       </div>
+
+      {/* ── Destructive Confirmation Modal ── */}
+      {confirmModal && pendingSql && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-zinc-900 border border-red-900/60 rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex items-center justify-center w-8 h-8 rounded-full bg-red-900/40 shrink-0">
+                <AlertTriangle size={15} className="text-red-400" />
+              </div>
+              <h3 className="text-sm font-semibold text-white">Destructive operation</h3>
+            </div>
+            <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
+              This query contains a <span className="text-red-400 font-medium">DROP</span>, <span className="text-red-400 font-medium">TRUNCATE</span>, or <span className="text-red-400 font-medium">DELETE without WHERE</span> — it may permanently remove data. Are you sure you want to run it?
+            </p>
+            <pre className="text-[11px] font-mono text-zinc-400 bg-zinc-800 rounded-lg px-3 py-2 mb-4 max-h-24 overflow-auto whitespace-pre-wrap border border-zinc-700">
+              {pendingSql.length > 300 ? pendingSql.slice(0, 300) + "…" : pendingSql}
+            </pre>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setConfirmModal(false); setPendingSql(null); }}
+                className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setConfirmModal(false);
+                  const sql = pendingSql;
+                  setPendingSql(null);
+                  await executeQuery(sql);
+                }}
+                className="cursor-pointer px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors"
+              >
+                Run anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Save Query Modal ── */}
       {saveModal && (

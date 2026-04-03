@@ -131,6 +131,7 @@ export async function buildAuthConfig(
 
   return {
     providers: providerInstances,
+    basePath: `/api/auth/${projectId}`,
     session: { strategy: "jwt" },
     callbacks: {
       async jwt({ token, user, account }) {

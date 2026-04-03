@@ -215,28 +215,22 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function CallbackUrlBox({ providerId }: { providerId: string }) {
-  const templateUrl = `{YOUR_APP_URL}/api/auth/callback/${providerId}`;
-  const domainUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/api/auth/callback/${providerId}`
-    : null;
+function CallbackUrlBox({ providerId, projectId }: { providerId: string; projectId: string }) {
+  const callbackPath = `/api/auth/v1/${projectId}/oauth/callback/${providerId}`;
+  const callbackUrl = typeof window !== "undefined"
+    ? `${window.location.origin}${callbackPath}`
+    : callbackPath;
 
   return (
     <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-4 py-3 space-y-2">
       <p className="text-xs text-zinc-500 font-medium">Callback URL</p>
-      <div className="flex items-center gap-2">
-        <p className="text-xs font-mono text-zinc-400 break-all flex-1">{templateUrl}</p>
-        <CopyButton text={templateUrl} />
-      </div>
-      {domainUrl && (
-        <div className="flex items-center gap-2">
-          <p className="text-xs font-mono text-zinc-300 break-all flex-1">{domainUrl}</p>
-          <CopyButton text={domainUrl} />
-        </div>
-      )}
-      <p className="text-xs text-zinc-600">
-        Add this URL as an authorized redirect URI in your OAuth app settings.
+      <p className="text-xs text-zinc-500">
+        Copy this URL and paste it as the authorized redirect/callback URI in your OAuth app settings.
       </p>
+      <div className="flex items-center gap-2 rounded-md bg-zinc-800 px-3 py-2">
+        <p className="text-xs font-mono text-zinc-200 break-all flex-1">{callbackUrl}</p>
+        <CopyButton text={callbackUrl} />
+      </div>
     </div>
   );
 }
@@ -624,7 +618,7 @@ export function ProviderConfigPage({ provider, projectId, existing }: Props) {
 
         {/* Callback URL hint for OAuth providers */}
         {needsOAuthCreds && (
-          <CallbackUrlBox providerId={provider.id} />
+          <CallbackUrlBox providerId={provider.id} projectId={projectId} />
         )}
 
         {/* Save */}
