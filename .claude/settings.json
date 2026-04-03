@@ -124,7 +124,12 @@
       "Bash(npm publish:*)",
       "Bash(pnpm --filter web add @auth/core@^0.37.2)",
       "Bash(pnpm list:*)",
-      "Bash(node -e \"const pkg = require\\('/Volumes/2TB/code/postbase.com/node_modules/.pnpm/next-auth@5.0.0-beta.30_next@16.1.6_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/next-auth/package.json'\\); console.log\\(pkg.dependencies?.['@auth/core'] || pkg.peerDependencies?.['@auth/core']\\)\")"
+      "Bash(node -e \"const pkg = require\\('/Volumes/2TB/code/postbase.com/node_modules/.pnpm/next-auth@5.0.0-beta.30_next@16.1.6_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/next-auth/package.json'\\); console.log\\(pkg.dependencies?.['@auth/core'] || pkg.peerDependencies?.['@auth/core']\\)\")",
+      "Bash(grep -r \"createActionURL\\\\|export.*Auth\" /Volumes/2TB/code/postbase.com/node_modules/.pnpm/next-auth@*/node_modules/next-auth/lib/index.d.ts)",
+      "Bash(grep -r \"createActionURL\\\\|export.*\\\\bAuth\\\\b\" /Volumes/2TB/code/postbase.com/node_modules/.pnpm/@auth+core@0.41.0*/node_modules/@auth/core/index.d.ts)",
+      "Bash(pnpm why:*)",
+      "Bash(xargs -I{} sh -c 'grep \"\\\\\"version\\\\\"\" {} | head -1')",
+      "Bash(pnpm --filter web build)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",

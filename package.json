@@ -20,5 +20,10 @@
   },
   "devDependencies": {
     "turbo": "^2.8.20"
+  },
+  "pnpm": {
+    "overrides": {
+      "@auth/core": "0.41.0"
+    }
   }
 }
