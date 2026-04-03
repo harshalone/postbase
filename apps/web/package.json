@@ -13,6 +13,7 @@
     "db:seed": "node scripts/seed-admin.mjs"
   },
   "dependencies": {
+    "@auth/core": "^0.37.4",
     "@auth/drizzle-adapter": "^1.7.0",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-dialog": "^1.1.0",

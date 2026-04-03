@@ -121,7 +121,10 @@
       "Bash(grep -r \"AUTH_SECRET\\\\|NEXTAUTH_SECRET\\\\|NEXTAUTH_URL\\\\|AUTH_URL\" /Volumes/2TB/code/postbase.com/apps/web/.env*)",
       "Bash(grep -r \"AUTH_SECRET\\\\|NEXTAUTH_SECRET\" /Volumes/2TB/code/postbase.com/.env*)",
       "Bash(npm version:*)",
-      "Bash(npm publish:*)"
+      "Bash(npm publish:*)",
+      "Bash(pnpm --filter web add @auth/core@^0.37.2)",
+      "Bash(pnpm list:*)",
+      "Bash(node -e \"const pkg = require\\('/Volumes/2TB/code/postbase.com/node_modules/.pnpm/next-auth@5.0.0-beta.30_next@16.1.6_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/next-auth/package.json'\\); console.log\\(pkg.dependencies?.['@auth/core'] || pkg.peerDependencies?.['@auth/core']\\)\")"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
