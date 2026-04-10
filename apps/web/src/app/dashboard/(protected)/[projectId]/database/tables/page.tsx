@@ -35,6 +35,7 @@ import {
   Copy,
   AlertTriangle,
   Upload,
+  Loader2,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -2975,7 +2976,7 @@ with check (
                 disabled={!importSqlContent.trim() || importSqlRunning}
                 className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
               >
-                <Upload size={14} />
+                {importSqlRunning ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                 {importSqlRunning ? "Running…" : "Run SQL"}
               </button>
             </div>
