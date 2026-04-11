@@ -7,6 +7,7 @@ import {
   jsonb,
   uuid,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -58,12 +59,12 @@ export const providerConfigs = postbaseSchema.table(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (t) => ({
-    projectProviderUnique: index("provider_configs_project_provider_idx").on(
+  (t) => [
+    index("provider_configs_project_provider_idx").on(
       t.projectId,
       t.provider
     ),
-  })
+  ]
 );
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
@@ -95,9 +96,7 @@ export const storageObjects = postbaseSchema.table(
     metadata: jsonb("metadata").default({}),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (t) => ({
-    bucketIdx: index("storage_objects_bucket_idx").on(t.bucketId),
-  })
+  (t) => [index("storage_objects_bucket_idx").on(t.bucketId)]
 );
 
 // ─── External storage connections ─────────────────────────────────────────────
@@ -120,9 +119,7 @@ export const storageConnections = postbaseSchema.table(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (t) => ({
-    projectIdx: index("storage_connections_project_idx").on(t.projectId),
-  })
+  (t) => [index("storage_connections_project_idx").on(t.projectId)]
 );
 
 // ─── Email settings ───────────────────────────────────────────────────────────
@@ -170,12 +167,12 @@ export const emailTemplates = postbaseSchema.table(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (t) => ({
-    projectTypeUnique: index("email_templates_project_type_idx").on(
+  (t) => [
+    index("email_templates_project_type_idx").on(
       t.projectId,
       t.type
     ),
-  })
+  ]
 );
 
 // ─── Audit logs ───────────────────────────────────────────────────────────────
@@ -195,10 +192,10 @@ export const auditLogs = postbaseSchema.table(
     metadata: jsonb("metadata").default({}),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (t) => ({
-    projectIdx: index("audit_logs_project_idx").on(t.projectId),
-    createdAtIdx: index("audit_logs_created_at_idx").on(t.createdAt),
-  })
+  (t) => [
+    index("audit_logs_project_idx").on(t.projectId),
+    index("audit_logs_created_at_idx").on(t.createdAt),
+  ]
 );
 
 // ─── Admin users (dashboard access, not project-scoped) ───────────────────────
@@ -213,6 +210,21 @@ export const adminUsers = postbaseSchema.table("admin_users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+export const adminUsersToOrganisations = postbaseSchema.table(
+  "admin_users_to_organisations",
+  {
+    adminUserId: uuid("admin_user_id")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "cascade" }),
+    organisationId: uuid("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("member"), // 'owner' | 'member'
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("admin_users_to_organisations_pk").on(t.adminUserId, t.organisationId)]
+);
 
 // ─── SQL query history ────────────────────────────────────────────────────────
 
@@ -230,10 +242,10 @@ export const sqlQueries = postbaseSchema.table(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (t) => ({
-    projectIdx: index("sql_queries_project_idx").on(t.projectId),
-    executedAtIdx: index("sql_queries_executed_at_idx").on(t.executedAt),
-  })
+  (t) => [
+    index("sql_queries_project_idx").on(t.projectId),
+    index("sql_queries_executed_at_idx").on(t.executedAt),
+  ]
 );
 
 // ─── Relations ────────────────────────────────────────────────────────────────
@@ -257,3 +269,21 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   }),
   emailTemplates: many(emailTemplates),
 }));
+
+export const adminUsersRelations = relations(adminUsers, ({ many }) => ({
+  organisations: many(adminUsersToOrganisations),
+}));
+
+export const adminUsersToOrganisationsRelations = relations(
+  adminUsersToOrganisations,
+  ({ one }) => ({
+    adminUser: one(adminUsers, {
+      fields: [adminUsersToOrganisations.adminUserId],
+      references: [adminUsers.id],
+    }),
+    organisation: one(organisations, {
+      fields: [adminUsersToOrganisations.organisationId],
+      references: [organisations.id],
+    }),
+  })
+);

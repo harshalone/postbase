@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { projects, adminUsersToOrganisations } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 import { getProjectPool, ensureProjectSchema } from "@/lib/project-db";
+import { auth } from "@/lib/auth/admin";
 
 /**
  * Rewrites CREATE [OR REPLACE] FUNCTION bodies to prepend
@@ -167,12 +168,47 @@ export async function POST(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
+  
+  // 1. Authenticate the dashboard session
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const user = session.user as { id: string; totpEnabled?: boolean; totpVerified?: boolean };
+
+  // 2. Enforce TOTP if enabled
+  if (user.totpEnabled && !user.totpVerified) {
+    return NextResponse.json({ error: "TOTP verification required" }, { status: 403 });
+  }
+
+  // 3. Fetch project and check if it exists
   const [project] = await db
     .select()
     .from(projects)
     .where(eq(projects.id, projectId))
     .limit(1);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+  // 4. Verify user has permission to this project's organisation
+  if (!project.organisationId) {
+    return NextResponse.json({ error: "Project has no assigned organisation" }, { status: 403 });
+  }
+
+  const [access] = await db
+    .select()
+    .from(adminUsersToOrganisations)
+    .where(
+      and(
+        eq(adminUsersToOrganisations.adminUserId, user.id),
+        eq(adminUsersToOrganisations.organisationId, project.organisationId)
+      )
+    )
+    .limit(1);
+
+  if (!access) {
+    return NextResponse.json({ error: "You do not have permission to access this project" }, { status: 403 });
+  }
 
   const { sql } = await req.json() as { sql: string };
   if (!sql?.trim()) return NextResponse.json({ error: "sql is required" }, { status: 400 });

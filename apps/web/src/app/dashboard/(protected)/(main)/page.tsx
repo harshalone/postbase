@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { CreateOrgDialog } from "../../create-org-dialog";
 import { CreateProjectDialog } from "../../create-project-dialog";
 import { EditOrgDialog } from "../../edit-org-dialog";
+import { ManageMembersDialog } from "../../manage-members-dialog";
 
 export default async function DashboardPage() {
   const allOrgs = await db.select().from(organisations).orderBy(organisations.createdAt);
@@ -50,6 +51,7 @@ export default async function DashboardPage() {
                 <p className="text-xs text-zinc-500 mt-0.5">{org.slug}</p>
               </div>
               <div className="flex items-center gap-2">
+                <ManageMembersDialog orgId={org.id} orgName={org.name} />
                 <EditOrgDialog orgId={org.id} currentName={org.name} />
                 <CreateProjectDialog organisationId={org.id} />
               </div>

@@ -25,27 +25,17 @@
  *               operation:
  *                 type: string
  *                 enum: [select, insert, update, upsert, delete]
- *                 description: The database operation to perform
  *               table:
  *                 type: string
- *                 description: The table name
  *               columns:
  *                 type: array
  *                 items:
  *                   type: string
- *                 description: Columns to select (only for select operation)
  *               filters:
  *                 type: array
  *                 items:
  *                   type: object
- *                   properties:
- *                     column:
- *                       type: string
- *                     operator:
- *                       type: string
- *                     value: {}
  *               data:
- *                 description: Data object or array of objects to insert/update
  *                 type: object
  *               limit:
  *                 type: integer
@@ -54,8 +44,6 @@
  *     responses:
  *       200:
  *         description: Query executed successfully
- *       400:
- *         description: Invalid query payload or query failed
  *       401:
  *         description: Missing or invalid API key
  */
@@ -65,6 +53,8 @@ import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectSchema } from "@/lib/project-db";
 import { z } from "zod";
+import { sql, SQL } from "drizzle-orm";
+import { buildWhereSql, Filter as QueryFilter, toRawQuery } from "@/lib/db/query-helper";
 
 const filterOperators = z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "in", "is", "contains", "overlaps", "textSearch"]);
 
@@ -74,7 +64,7 @@ const filterSchema = z.object({
   value: z.unknown(),
 });
 
-const orFilterSchema = z.string(); // raw filter string like "name.eq.foo,age.gt.18"
+const orFilterSchema = z.string();
 const notFilterSchema = z.object({ column: z.string(), operator: z.string(), value: z.unknown() });
 
 const baseQueryFields = {
@@ -124,84 +114,6 @@ const querySchema = z.discriminatedUnion("operation", [
   }),
 ]);
 
-type QueryInput = z.infer<typeof querySchema>;
-type Filter = { column: string; operator: string; value: unknown };
-
-function sanitizeIdentifier(name: string): string {
-  if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(name)) {
-    throw new Error(`Invalid identifier: ${name}`);
-  }
-  return name;
-}
-
-function buildFilterClause(filter: Filter, values: unknown[]): string {
-  const col = `"${sanitizeIdentifier(filter.column)}"`;
-
-  switch (filter.operator) {
-    case "in": {
-      const arr = filter.value as unknown[];
-      if (!arr.length) return "FALSE";
-      const placeholders = arr.map(() => { values.push(arr[values.length]); return `$${values.length}`; });
-      // Fix: push all at once
-      values.splice(values.length - arr.length, arr.length);
-      arr.forEach((v) => values.push(v));
-      const phs = arr.map((_, i) => `$${values.length - arr.length + i + 1}`);
-      return `${col} IN (${phs.join(", ")})`;
-    }
-    case "is": {
-      if (filter.value === null) return `${col} IS NULL`;
-      if (filter.value === true) return `${col} IS TRUE`;
-      if (filter.value === false) return `${col} IS FALSE`;
-      return `${col} IS NOT NULL`;
-    }
-    case "contains": {
-      values.push(JSON.stringify(filter.value));
-      return `${col} @> $${values.length}::jsonb`;
-    }
-    case "overlaps": {
-      values.push(filter.value);
-      return `${col} && $${values.length}`;
-    }
-    case "textSearch": {
-      const ts = filter.value as { query: string; config?: string };
-      const config = ts.config ?? "english";
-      values.push(ts.query);
-      return `to_tsvector('${config}', ${col}) @@ plainto_tsquery('${config}', $${values.length})`;
-    }
-    default: {
-      const opMap: Record<string, string> = {
-        eq: "=", neq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=", like: "LIKE", ilike: "ILIKE",
-      };
-      values.push(filter.value);
-      return `${col} ${opMap[filter.operator] ?? "="} $${values.length}`;
-    }
-  }
-}
-
-function buildWhereClause(filters: Filter[], orFilters: string[], notFilters: Array<{ column: string; operator: string; value: unknown }>, values: unknown[]): string {
-  const parts: string[] = [];
-
-  for (const f of filters) {
-    parts.push(buildFilterClause(f, values));
-  }
-
-  for (const notF of notFilters) {
-    parts.push(`NOT (${buildFilterClause(notF, values)})`);
-  }
-
-  // orFilters are strings like "status.eq.active,role.eq.admin"
-  for (const orStr of orFilters) {
-    const orParts = orStr.split(",").map((part) => {
-      const [col, op, ...rest] = part.trim().split(".");
-      const val = rest.join(".");
-      return buildFilterClause({ column: col, operator: op, value: val }, values);
-    });
-    if (orParts.length > 0) parts.push(`(${orParts.join(" OR ")})`);
-  }
-
-  return parts.length > 0 ? `WHERE ${parts.join(" AND ")}` : "";
-}
-
 export async function POST(req: NextRequest) {
   // 1. Authenticate
   const authHeader = req.headers.get("authorization");
@@ -237,7 +149,7 @@ export async function POST(req: NextRequest) {
         userId = payload.sub;
       }
     } catch {
-      // ignore — just use anon role
+      // ignore
     }
   }
 
@@ -245,12 +157,9 @@ export async function POST(req: NextRequest) {
   const client = await pool.connect();
 
   try {
-    const values: unknown[] = [];
-    let sql = "";
-
     // Set search_path to project schema so bare table names resolve correctly
     const schema = getProjectSchema(keyInfo.projectId);
-    await client.query(`SET search_path TO "${schema}", public`);
+    await client.query(`SET search_path TO ${toRawQuery(sql`${sql.identifier(schema)}`).text}, public`);
 
     // Set RLS context
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
@@ -259,52 +168,65 @@ export async function POST(req: NextRequest) {
       await client.query("SELECT set_config('postbase.user_id', $1, true)", [userId]);
     }
 
-    const table = sanitizeIdentifier(input.table);
     const orFilters = ("orFilters" in input ? input.orFilters : undefined) ?? [];
     const notFilters = ("notFilters" in input ? input.notFilters : undefined) ?? [];
     const filters = ("filters" in input ? input.filters : undefined) ?? [];
     const orderBy = input.order ?? [];
-    const returning = "returning" in input && input.returning ? input.returning : "*";
+    const returningClause = "returning" in input && input.returning ? input.returning : "*";
+
+    // Build WHERE clause SQL
+    const whereSql = buildWhereSql(filters as QueryFilter[], orFilters, notFilters as QueryFilter[]);
+    const whereFragment = whereSql ? sql` WHERE ${whereSql}` : sql``;
+
+    // Helper for returning clause
+    const getReturning = () => {
+      if (returningClause === "*") return sql` RETURNING *`;
+      const cols = returningClause.split(",").map(c => sql.identifier(c.trim()));
+      return sql` RETURNING ${sql.join(cols, sql`, `)}`;
+    };
+
+    let query: SQL;
 
     switch (input.operation) {
       case "select": {
         if (input.head) {
-          // COUNT only
-          const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
-          sql = `SELECT COUNT(*) FROM "${table}" ${whereClause}`;
-          const result = await client.query(sql, values);
+          query = sql`SELECT COUNT(*) FROM ${sql.identifier(input.table)}${whereFragment}`;
+          const result = await client.query(toRawQuery(query));
           return Response.json({ data: null, count: parseInt(result.rows[0].count, 10) });
         }
 
-        const cols = input.columns
-          ?.flatMap((c) => c.split(",").map((s) => s.trim()).filter(Boolean))
-          .map((c) => `"${sanitizeIdentifier(c)}"`)
-          .join(", ") ?? "*";
-        const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
+        const colsStr = input.columns?.flatMap((c) => c.split(",").map((s) => s.trim()).filter(Boolean)) ?? [];
+        const selectCols = colsStr.length > 0 
+          ? sql.join(colsStr.map(c => sql.identifier(c)), sql`, `)
+          : sql`*`;
+
+        const baseQuery = sql`SELECT ${selectCols} FROM ${sql.identifier(input.table)}${whereFragment}`;
+        
+        let orderFragment = sql``;
+        if (orderBy.length) {
+          const parts = orderBy.map(o => {
+            const col = sql.identifier(o.column);
+            const dir = o.ascending === false ? sql`DESC` : sql`ASC`;
+            const nulls = o.nullsFirst ? sql` NULLS FIRST` : sql``;
+            return sql`${col} ${dir}${nulls}`;
+          });
+          orderFragment = sql` ORDER BY ${sql.join(parts, sql`, `)}`;
+        }
+
+        const limitFragment = input.limit ? sql` LIMIT ${input.limit}` : sql``;
+        const offsetFragment = input.offset ? sql` OFFSET ${input.offset}` : sql``;
 
         if (input.count === "exact") {
-          // Run COUNT alongside
-          const countSql = `SELECT COUNT(*) FROM "${table}" ${whereClause}`;
-          const countResult = await client.query(countSql, values);
+          const countQuery = sql`SELECT COUNT(*) FROM ${sql.identifier(input.table)}${whereFragment}`;
+          const countResult = await client.query(toRawQuery(countQuery));
           const total = parseInt(countResult.rows[0].count, 10);
 
-          sql = `SELECT ${cols} FROM "${table}" ${whereClause}`;
-          if (orderBy.length) {
-            sql += " ORDER BY " + orderBy.map(o => `"${sanitizeIdentifier(o.column)}" ${o.ascending === false ? "DESC" : "ASC"}${o.nullsFirst ? " NULLS FIRST" : ""}`).join(", ");
-          }
-          if (input.limit) { values.push(input.limit); sql += ` LIMIT $${values.length}`; }
-          if (input.offset) { values.push(input.offset); sql += ` OFFSET $${values.length}`; }
-
-          const result = await client.query(sql, values);
+          const finalQuery = sql`${baseQuery}${orderFragment}${limitFragment}${offsetFragment}`;
+          const result = await client.query(toRawQuery(finalQuery));
           return Response.json({ data: result.rows, count: total });
         }
 
-        sql = `SELECT ${cols} FROM "${table}" ${whereClause}`;
-        if (orderBy.length) {
-          sql += " ORDER BY " + orderBy.map(o => `"${sanitizeIdentifier(o.column)}" ${o.ascending === false ? "DESC" : "ASC"}${o.nullsFirst ? " NULLS FIRST" : ""}`).join(", ");
-        }
-        if (input.limit) { values.push(input.limit); sql += ` LIMIT $${values.length}`; }
-        if (input.offset) { values.push(input.offset); sql += ` OFFSET $${values.length}`; }
+        query = sql`${baseQuery}${orderFragment}${limitFragment}${offsetFragment}`;
         break;
       }
 
@@ -312,20 +234,15 @@ export async function POST(req: NextRequest) {
         const rows = Array.isArray(input.data) ? input.data : [input.data];
         if (rows.length === 0) return Response.json({ data: [], count: 0 });
 
-        const keys = Object.keys(rows[0]).map(sanitizeIdentifier);
-        const placeholders = rows.map((row, ri) =>
-          `(${Object.values(row).map((_, ci) => { values.push(Object.values(row)[ci]); return `$${values.length}`; }).join(", ")})`
-        );
-
-        // Fix placeholder building
-        values.length = 0;
-        const allPlaceholders = rows.map((row) => {
-          const rowVals = Object.values(row);
-          const phs = rowVals.map((v) => { values.push(v); return `$${values.length}`; });
-          return `(${phs.join(", ")})`;
+        const keys = Object.keys(rows[0]);
+        const columns = sql.join(keys.map(k => sql.identifier(k)), sql`, `);
+        
+        const valuesList = rows.map(row => {
+          const vals = keys.map(k => sql`${row[k]}`);
+          return sql`(${sql.join(vals, sql`, `)})`;
         });
 
-        sql = `INSERT INTO "${table}" (${keys.map((k) => `"${k}"`).join(", ")}) VALUES ${allPlaceholders.join(", ")} RETURNING ${returning}`;
+        query = sql`INSERT INTO ${sql.identifier(input.table)} (${columns}) VALUES ${sql.join(valuesList, sql`, `)}${getReturning()}`;
         break;
       }
 
@@ -333,46 +250,47 @@ export async function POST(req: NextRequest) {
         const rows = Array.isArray(input.data) ? input.data : [input.data];
         if (rows.length === 0) return Response.json({ data: [], count: 0 });
 
-        const keys = Object.keys(rows[0]).map(sanitizeIdentifier);
-        values.length = 0;
-        const allPlaceholders = rows.map((row) => {
-          const rowVals = Object.values(row);
-          const phs = rowVals.map((v) => { values.push(v); return `$${values.length}`; });
-          return `(${phs.join(", ")})`;
+        const keys = Object.keys(rows[0]);
+        const columns = sql.join(keys.map(k => sql.identifier(k)), sql`, `);
+        
+        const valuesList = rows.map(row => {
+          const vals = keys.map(k => sql`${row[k]}`);
+          return sql`(${sql.join(vals, sql`, `)})`;
         });
 
-        const conflict = input.onConflict ? `(${input.onConflict.split(",").map((c) => `"${sanitizeIdentifier(c.trim())}"`).join(", ")})` : "";
-        const updateCols = keys.map((k) => `"${k}" = EXCLUDED."${k}"`).join(", ");
+        const conflictFragment = input.onConflict 
+          ? sql` ON CONFLICT (${sql.join(input.onConflict.split(",").map(c => sql.identifier(c.trim())), sql`, `)})`
+          : sql` ON CONFLICT`;
 
-        sql = `INSERT INTO "${table}" (${keys.map((k) => `"${k}"`).join(", ")}) VALUES ${allPlaceholders.join(", ")}`;
-        sql += conflict ? ` ON CONFLICT ${conflict} DO UPDATE SET ${updateCols}` : ` ON CONFLICT DO NOTHING`;
-        sql += ` RETURNING ${returning}`;
+        const updateCols = sql.join(keys.map(k => sql`${sql.identifier(k)} = EXCLUDED.${sql.identifier(k)}`), sql`, `);
+        const updateFragment = input.onConflict ? sql` DO UPDATE SET ${updateCols}` : sql` DO NOTHING`;
+
+        query = sql`INSERT INTO ${sql.identifier(input.table)} (${columns}) VALUES ${sql.join(valuesList, sql`, `)}${conflictFragment}${updateFragment}${getReturning()}`;
         break;
       }
 
       case "update": {
-        const keys = Object.keys(input.data).map(sanitizeIdentifier);
-        const vals = Object.values(input.data);
-        vals.forEach((v) => values.push(v));
-        const setClauses = keys.map((k, i) => `"${k}" = $${i + 1}`);
+        const keys = Object.keys(input.data);
+        const setClauses = sql.join(keys.map(k => sql`${sql.identifier(k)} = ${input.data[k]}`), sql`, `);
 
-        const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
-        sql = `UPDATE "${table}" SET ${setClauses.join(", ")} ${whereClause} RETURNING ${returning}`;
+        query = sql`UPDATE ${sql.identifier(input.table)} SET ${setClauses}${whereFragment}${getReturning()}`;
         break;
       }
 
       case "delete": {
-        const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
-        sql = `DELETE FROM "${table}" ${whereClause} RETURNING ${returning}`;
+        query = sql`DELETE FROM ${sql.identifier(input.table)}${whereFragment}${getReturning()}`;
         break;
       }
+
+      default:
+        return Response.json({ error: "Unsupported operation" }, { status: 400 });
     }
 
-    const result = await client.query(sql, values);
+    const result = await client.query(toRawQuery(query));
     return Response.json({ data: result.rows, count: result.rowCount });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Query failed";
-    console.error("[db/query] ERROR:", message, "| table:", input.table, "| operation:", input.operation, "| schema:", getProjectSchema(keyInfo.projectId), "| columns:", JSON.stringify("columns" in input ? input.columns : null), "| filters:", JSON.stringify("filters" in input ? input.filters : null));
+    console.error("[db/query] ERROR:", message, "| table:", input.table, "| operation:", input.operation, "| schema:", getProjectSchema(keyInfo.projectId));
     return Response.json({ error: message }, { status: 400 });
   } finally {
     await client.query('RESET search_path').catch(() => {});

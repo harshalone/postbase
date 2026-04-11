@@ -2,9 +2,15 @@ import { Pool, PoolClient } from "pg";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 
 // Each project gets its own PostgreSQL schema: proj_<uuid_no_hyphens>
 export function getProjectSchema(projectId: string): string {
+  // Strict UUID validation to prevent SQL injection via identifier escaping
+  const result = z.string().uuid().safeParse(projectId);
+  if (!result.success) {
+    throw new Error(`Invalid projectId format: ${projectId}`);
+  }
   return `proj_${projectId.replace(/-/g, "")}`;
 }
 
