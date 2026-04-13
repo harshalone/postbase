@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   Upload,
   Loader2,
+  Play,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -346,9 +347,24 @@ export default function DatabasePage({
   const showImportSql = importSqlPanel.visible;
   const [importSqlContent, setImportSqlContent] = useState("");
   const [importSqlFileName, setImportSqlFileName] = useState<string | null>(null);
+  const [importSqlFileSize, setImportSqlFileSize] = useState<number>(0);
+  const importSqlFileRef = useRef<File | null>(null);
+  const IMPORT_SQL_PREVIEW_LIMIT = 200 * 1024; // 200 KB — show textarea only for small files
   const [importSqlDragging, setImportSqlDragging] = useState(false);
-  const [importSqlRunning, setImportSqlRunning] = useState(false);
-  const [importSqlResult, setImportSqlResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [importSqlReading, setImportSqlReading] = useState(false);
+  const [importSqlReadProgress, setImportSqlReadProgress] = useState(0);
+  const importSqlAbortRef = useRef<boolean>(false);
+
+  type ImportChunk = {
+    id: number;
+    label: string;
+    sql: string;
+    status: "pending" | "running" | "done" | "error";
+    error?: string;
+  };
+  const [importChunks, setImportChunks] = useState<ImportChunk[]>([]);
+  const [importRunning, setImportRunning] = useState(false);
+  const [importDone, setImportDone] = useState(false);
   const importSqlInputRef = useRef<HTMLInputElement>(null);
 
   // ─── Data fetchers ──────────────────────────────────────────────────────────
@@ -858,35 +874,155 @@ export default function DatabasePage({
       toast.error("Please select a .sql file");
       return;
     }
+    importSqlFileRef.current = file;
     setImportSqlFileName(file.name);
-    setImportSqlResult(null);
-    const reader = new FileReader();
-    reader.onload = (e) => setImportSqlContent((e.target?.result as string) ?? "");
-    reader.readAsText(file);
+    setImportSqlFileSize(file.size);
+    setImportChunks([]);
+    setImportDone(false);
+    setImportSqlContent("");
+    // Only read into state (for the preview textarea) if the file is small enough
+    if (file.size <= IMPORT_SQL_PREVIEW_LIMIT) {
+      setImportSqlReading(true);
+      setImportSqlReadProgress(0);
+      const reader = new FileReader();
+      reader.onprogress = (e) => {
+        if (e.lengthComputable) setImportSqlReadProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      reader.onload = (e) => {
+        setImportSqlContent((e.target?.result as string) ?? "");
+        setImportSqlReading(false);
+        setImportSqlReadProgress(100);
+      };
+      reader.onerror = () => { setImportSqlReading(false); setImportSqlReadProgress(0); };
+      reader.readAsText(file);
+    }
   }
 
-  async function runImportSql() {
-    if (!importSqlContent.trim()) return;
-    setImportSqlRunning(true);
-    setImportSqlResult(null);
-    try {
-      const res = await fetch(`/api/dashboard/${projectId}/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: importSqlContent }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        setImportSqlResult({ success: false, message: data.error });
-      } else {
-        setImportSqlResult({ success: true, message: `SQL executed successfully. Command: ${data.command ?? "OK"}` });
-        fetchTables();
+  /** Split raw SQL text into import chunks — mirrors server parseDumpChunks logic.
+   *  - Each COPY...FROM stdin block becomes one chunk (atomic).
+   *  - Regular statements are grouped STATEMENTS_PER_BATCH at a time.
+   */
+  function buildImportChunks(sql: string): Omit<ImportChunk, "id">[] {
+    const STATEMENTS_PER_BATCH = 50;
+    const lines = sql.split("\n");
+    let i = 0;
+    const stmtLines: string[] = [];
+    const raw: { label: string; sql: string }[] = [];
+
+    function flushStmts() {
+      if (stmtLines.length === 0) return;
+      const text = stmtLines.join("\n").trim();
+      stmtLines.length = 0;
+      if (!text) return;
+      // Simple semicolon split (doesn't need to be as thorough as server — server re-parses)
+      const stmts = text.split(/;\s*\n/).map(s => s.trim()).filter(Boolean).map(s => s.endsWith(";") ? s : s + ";");
+      for (let s = 0; s < stmts.length; s += STATEMENTS_PER_BATCH) {
+        const batch = stmts.slice(s, s + STATEMENTS_PER_BATCH);
+        raw.push({ label: `Statements ${raw.length + 1}–${raw.length + batch.length} (batch)`, sql: batch.join("\n") });
       }
-    } catch (err) {
-      setImportSqlResult({ success: false, message: err instanceof Error ? err.message : "Unknown error" });
-    } finally {
-      setImportSqlRunning(false);
     }
+
+    while (i < lines.length) {
+      const line = lines[i];
+      if (/^\s*COPY\s+\S.*\s+FROM\s+stdin\s*;?\s*$/i.test(line)) {
+        flushStmts();
+        const header = line.trim().endsWith(";") ? line.trim() : line.trim() + ";";
+        // Extract table name for label
+        const tableMatch = /COPY\s+(?:"?[\w.]+"?\.)?"?([\w]+)"?/i.exec(line);
+        const tableName = tableMatch?.[1] ?? "unknown";
+        i++;
+        const dataLines: string[] = [];
+        while (i < lines.length) {
+          if (lines[i] === "\\.") { i++; break; }
+          dataLines.push(lines[i]);
+          i++;
+        }
+        const dataRows = dataLines.join("\n") + (dataLines.length > 0 ? "\n" : "");
+        // Reconstruct as a SQL block the server can parse
+        const copyBlock = `${header}\n${dataRows}\\.`;
+        raw.push({ label: `COPY ${tableName} (${dataLines.length.toLocaleString()} rows)`, sql: copyBlock });
+        continue;
+      }
+      stmtLines.push(line);
+      i++;
+    }
+    flushStmts();
+    return raw.map((r, idx) => ({ ...r, label: r.label.replace("(batch)", `(chunk ${idx + 1})`), status: "pending" as const }));
+  }
+
+  async function runImportSql(startFromIndex = 0) {
+    const file = importSqlFileRef.current;
+    const hasContent = file !== null || importSqlContent.trim().length > 0;
+    if (!hasContent) return;
+
+    setImportRunning(true);
+    setImportDone(false);
+    importSqlAbortRef.current = false;
+
+    // Build chunks if starting fresh
+    let chunks = importChunks;
+    if (startFromIndex === 0 || chunks.length === 0) {
+      setImportSqlReading(true);
+      setImportSqlReadProgress(0);
+      let sql: string;
+      if (file) {
+        sql = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onprogress = (e) => {
+            if (e.lengthComputable) setImportSqlReadProgress(Math.round((e.loaded / e.total) * 100));
+          };
+          reader.onload = (e) => resolve((e.target?.result as string) ?? "");
+          reader.onerror = () => reject(new Error("Failed to read file"));
+          reader.readAsText(file);
+        });
+      } else {
+        sql = importSqlContent.trim();
+      }
+      setImportSqlReading(false);
+      setImportSqlReadProgress(100);
+
+      const built = buildImportChunks(sql);
+      chunks = built.map((c, idx) => ({ ...c, id: idx }));
+      setImportChunks(chunks);
+    } else {
+      // Resume: reset errored/pending chunks from startFromIndex onward
+      chunks = chunks.map((c) =>
+        c.id >= startFromIndex ? { ...c, status: "pending" as const, error: undefined } : c
+      );
+      setImportChunks(chunks);
+    }
+
+    // Run chunks sequentially
+    for (let idx = startFromIndex; idx < chunks.length; idx++) {
+      if (importSqlAbortRef.current) break;
+
+      // Mark running
+      setImportChunks((prev) => prev.map((c) => c.id === idx ? { ...c, status: "running" } : c));
+
+      try {
+        const res = await fetch(`/api/dashboard/${projectId}/sql`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql: chunks[idx].sql }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          setImportChunks((prev) => prev.map((c) => c.id === idx ? { ...c, status: "error", error: data.error } : c));
+          setImportRunning(false);
+          return; // Stop on first error — user can resume from this chunk
+        }
+        setImportChunks((prev) => prev.map((c) => c.id === idx ? { ...c, status: "done" } : c));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        setImportChunks((prev) => prev.map((c) => c.id === idx ? { ...c, status: "error", error: msg } : c));
+        setImportRunning(false);
+        return;
+      }
+    }
+
+    setImportRunning(false);
+    setImportDone(true);
+    fetchTables();
   }
 
   // ─── Derived ─────────────────────────────────────────────────────────────────
@@ -916,7 +1052,7 @@ export default function DatabasePage({
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-semibold text-white">Database</h1>
           <button
-            onClick={() => { setImportSqlContent(""); setImportSqlFileName(null); setImportSqlResult(null); importSqlPanel.open(); }}
+            onClick={() => { setImportSqlContent(""); setImportSqlFileName(null); setImportSqlFileSize(0); importSqlFileRef.current = null; setImportSqlReading(false); setImportSqlReadProgress(0); setImportChunks([]); setImportDone(false); importSqlPanel.open(); }}
             className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
           >
             <Upload size={12} />
@@ -2871,13 +3007,13 @@ with check (
             className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${importSqlPanel.closing ? "closing" : ""}`}
             onClick={() => importSqlPanel.close()}
           />
-          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[560px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${importSqlPanel.closing ? "closing" : ""}`}>
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[580px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${importSqlPanel.closing ? "closing" : ""}`}>
 
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
               <div>
                 <p className="text-sm font-semibold text-white">Import SQL</p>
-                <p className="text-xs text-zinc-500 mt-0.5">Upload a .sql file to create tables, indexes, or run any SQL</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Upload a .sql or pg_dump file — imported in chunks with resume on error</p>
               </div>
               <button
                 onClick={() => importSqlPanel.close()}
@@ -2890,75 +3026,176 @@ with check (
             {/* Body */}
             <div className="flex-1 overflow-y-auto flex flex-col gap-4 p-6">
 
-              {/* Drop zone */}
-              <div
-                onDragOver={(e) => { e.preventDefault(); setImportSqlDragging(true); }}
-                onDragLeave={() => setImportSqlDragging(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setImportSqlDragging(false);
-                  const file = e.dataTransfer.files[0];
-                  if (file) handleImportSqlFile(file);
-                }}
-                onClick={() => importSqlInputRef.current?.click()}
-                className={`cursor-pointer flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl py-10 transition-colors ${
-                  importSqlDragging
-                    ? "border-brand-500 bg-brand-500/5"
-                    : "border-zinc-700 hover:border-zinc-500 bg-zinc-900/40"
-                }`}
-              >
-                <Upload size={24} className="text-zinc-500" />
-                <div className="text-center">
-                  <p className="text-sm text-zinc-300">
-                    {importSqlFileName ?? "Drop a .sql file here or click to browse"}
-                  </p>
-                  {!importSqlFileName && (
-                    <p className="text-xs text-zinc-600 mt-1">Supports .sql files</p>
+              {/* Drop zone — hide once chunks are built */}
+              {importChunks.length === 0 && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setImportSqlDragging(true); }}
+                  onDragLeave={() => setImportSqlDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setImportSqlDragging(false);
+                    const file = e.dataTransfer.files[0];
+                    if (file) handleImportSqlFile(file);
+                  }}
+                  onClick={() => importSqlInputRef.current?.click()}
+                  className={`cursor-pointer flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl py-10 transition-colors ${
+                    importSqlDragging
+                      ? "border-brand-500 bg-brand-500/5"
+                      : "border-zinc-700 hover:border-zinc-500 bg-zinc-900/40"
+                  }`}
+                >
+                  <Upload size={24} className="text-zinc-500" />
+                  <div className="text-center">
+                    <p className="text-sm text-zinc-300">
+                      {importSqlFileName ?? "Drop a .sql file here or click to browse"}
+                    </p>
+                    {!importSqlFileName && (
+                      <p className="text-xs text-zinc-600 mt-1">Supports .sql and pg_dump files</p>
+                    )}
+                    {importSqlFileName && importSqlFileSize > 0 && (
+                      <p className="text-xs text-zinc-500 mt-1">
+                        {importSqlFileSize >= 1024 * 1024
+                          ? `${(importSqlFileSize / (1024 * 1024)).toFixed(1)} MB`
+                          : `${(importSqlFileSize / 1024).toFixed(1)} KB`}
+                      </p>
+                    )}
+                  </div>
+                  {importSqlFileName && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setImportSqlFileName(null); setImportSqlFileSize(0); importSqlFileRef.current = null; setImportSqlContent(""); setImportSqlReading(false); setImportSqlReadProgress(0); setImportChunks([]); setImportDone(false); }}
+                      className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 underline"
+                    >
+                      Remove file
+                    </button>
                   )}
+                  <input
+                    ref={importSqlInputRef}
+                    type="file"
+                    accept=".sql,text/plain"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportSqlFile(f); e.target.value = ""; }}
+                  />
                 </div>
-                {importSqlFileName && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setImportSqlFileName(null); setImportSqlContent(""); setImportSqlResult(null); }}
-                    className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 underline"
-                  >
-                    Remove file
-                  </button>
-                )}
-                <input
-                  ref={importSqlInputRef}
-                  type="file"
-                  accept=".sql,text/plain"
-                  className="hidden"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportSqlFile(f); e.target.value = ""; }}
-                />
-              </div>
+              )}
 
-              {/* SQL preview / editor */}
-              {importSqlContent && (
+              {/* File reading progress (shown while reading large file before chunking) */}
+              {importSqlReading && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Reading file…</span>
+                    <span>{importSqlReadProgress}%</span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-brand-500 transition-all duration-150"
+                      style={{ width: `${importSqlReadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* SQL preview — only for small files, before running */}
+              {importChunks.length === 0 && importSqlContent && importSqlFileSize <= IMPORT_SQL_PREVIEW_LIMIT && (
                 <div className="flex flex-col gap-2">
                   <label className="text-xs text-zinc-400 font-medium">SQL Preview / Edit</label>
                   <textarea
                     value={importSqlContent}
                     onChange={(e) => setImportSqlContent(e.target.value)}
-                    rows={12}
+                    rows={10}
                     spellCheck={false}
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono placeholder-zinc-600 focus:outline-none focus:border-brand-500 resize-y"
                   />
                 </div>
               )}
 
-              {/* Result */}
-              {importSqlResult && (
-                <div className={`flex items-start gap-3 rounded-lg px-4 py-3 text-sm border ${
-                  importSqlResult.success
-                    ? "bg-green-950/40 border-green-800/50 text-green-300"
-                    : "bg-red-950/40 border-red-800/50 text-red-300"
-                }`}>
-                  {importSqlResult.success
-                    ? <Check size={14} className="mt-0.5 shrink-0" />
-                    : <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                  }
-                  <span className="break-words">{importSqlResult.message}</span>
+              {/* Overall progress bar — shown once chunks exist */}
+              {importChunks.length > 0 && (() => {
+                const done = importChunks.filter(c => c.status === "done").length;
+                const errored = importChunks.filter(c => c.status === "error").length;
+                const pct = Math.round((done / importChunks.length) * 100);
+                return (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-xs text-zinc-400">
+                      <span className="font-medium text-zinc-300">
+                        {importSqlFileName && (
+                          <button
+                            onClick={() => { setImportChunks([]); setImportDone(false); }}
+                            className="cursor-pointer text-zinc-500 hover:text-zinc-300 underline mr-2"
+                          >
+                            ← Change file
+                          </button>
+                        )}
+                        {importSqlFileName}
+                      </span>
+                      <span>
+                        {errored > 0
+                          ? <span className="text-red-400">{done}/{importChunks.length} — error in chunk {importChunks.findIndex(c => c.status === "error") + 1}</span>
+                          : importDone
+                            ? <span className="text-green-400">Complete</span>
+                            : <span>{done}/{importChunks.length} chunks</span>
+                        }
+                      </span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${errored > 0 ? "bg-red-500" : importDone ? "bg-green-500" : "bg-brand-500"}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Chunk list */}
+              {importChunks.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs font-medium text-zinc-400">{importChunks.length} chunks</p>
+                  <div className="flex flex-col gap-1 max-h-72 overflow-y-auto pr-1">
+                    {importChunks.map((chunk) => (
+                      <div
+                        key={chunk.id}
+                        className={`flex items-start gap-3 rounded-lg px-3 py-2.5 text-xs border transition-colors ${
+                          chunk.status === "done"
+                            ? "bg-green-950/20 border-green-900/40 text-green-300"
+                            : chunk.status === "error"
+                              ? "bg-red-950/30 border-red-800/50 text-red-300"
+                              : chunk.status === "running"
+                                ? "bg-brand-950/30 border-brand-700/40 text-brand-300"
+                                : "bg-zinc-900/40 border-zinc-800 text-zinc-500"
+                        }`}
+                      >
+                        <span className="shrink-0 mt-0.5">
+                          {chunk.status === "done" && <Check size={12} className="text-green-400" />}
+                          {chunk.status === "error" && <AlertTriangle size={12} className="text-red-400" />}
+                          {chunk.status === "running" && <Loader2 size={12} className="animate-spin text-brand-400" />}
+                          {chunk.status === "pending" && <span className="inline-block w-3 h-3 rounded-full border border-zinc-600" />}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium">{chunk.label}</span>
+                          {chunk.status === "error" && chunk.error && (
+                            <p className="mt-1 text-red-400 break-words">{chunk.error}</p>
+                          )}
+                        </div>
+                        {chunk.status === "error" && (
+                          <button
+                            onClick={() => runImportSql(chunk.id)}
+                            disabled={importRunning}
+                            className="cursor-pointer shrink-0 text-xs text-red-400 hover:text-red-200 underline disabled:opacity-50"
+                          >
+                            Retry from here
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Success banner */}
+              {importDone && (
+                <div className="flex items-center gap-3 rounded-lg px-4 py-3 text-sm border bg-green-950/40 border-green-800/50 text-green-300">
+                  <Check size={14} className="shrink-0" />
+                  <span>All chunks imported successfully. Tables have been refreshed.</span>
                 </div>
               )}
             </div>
@@ -2969,16 +3206,18 @@ with check (
                 onClick={() => importSqlPanel.close()}
                 className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
               >
-                Cancel
+                {importDone ? "Close" : "Cancel"}
               </button>
-              <button
-                onClick={runImportSql}
-                disabled={!importSqlContent.trim() || importSqlRunning}
-                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
-              >
-                {importSqlRunning ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                {importSqlRunning ? "Running…" : "Run SQL"}
-              </button>
+              {!importDone && (
+                <button
+                  onClick={() => runImportSql(0)}
+                  disabled={(!importSqlContent.trim() && importSqlFileRef.current === null) || importRunning || importSqlReading}
+                  className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
+                >
+                  {importRunning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} className="fill-current" />}
+                  {importRunning ? "Importing…" : importChunks.length > 0 ? "Restart Import" : "Start Import"}
+                </button>
+              )}
             </div>
           </div>
         </>

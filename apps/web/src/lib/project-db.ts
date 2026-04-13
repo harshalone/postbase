@@ -82,15 +82,17 @@ export async function getProjectById(
 // Creates users, accounts, sessions, verification_tokens in the project schema.
 // Idempotent — safe to call on every request.
 
-// Cache of schemas that have already been initialised in this process lifetime.
-// Avoids the catalog lookup overhead on every auth request after first call.
-const initialisedSchemas = new Set<string>();
+// Bump this version whenever new tables/columns are added to ensureProjectAuthTables.
+// The cache stores the last version each schema was migrated to; if the stored
+// version is lower than SCHEMA_VERSION, migrations are re-run.
+const SCHEMA_VERSION = 2;
+const initialisedSchemas = new Map<string, number>();
 
 export async function ensureProjectAuthTables(
   client: PoolClient,
   schema: string
 ): Promise<void> {
-  if (initialisedSchemas.has(schema)) return;
+  if ((initialisedSchemas.get(schema) ?? 0) >= SCHEMA_VERSION) return;
 
   // Use a session-level advisory lock keyed on the schema name to prevent
   // concurrent DDL races (which cause "duplicate key in pg_type" errors).
@@ -101,7 +103,7 @@ export async function ensureProjectAuthTables(
 
   try {
     // Re-check after acquiring the lock — another request may have finished.
-    if (initialisedSchemas.has(schema)) return;
+    if ((initialisedSchemas.get(schema) ?? 0) >= SCHEMA_VERSION) return;
 
     await client.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
 
@@ -171,7 +173,7 @@ export async function ensureProjectAuthTables(
         ON "${schema}"."sessions" ("user_id")
     `);
 
-    initialisedSchemas.add(schema);
+    initialisedSchemas.set(schema, SCHEMA_VERSION);
   } finally {
     await client.query(`SELECT pg_advisory_unlock($1)`, [lockKey]);
   }
