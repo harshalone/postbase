@@ -47,6 +47,7 @@ import { Pool } from "pg";
 import { z } from "zod";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
+import { getProjectSchema } from "@/lib/project-db";
 
 const bodySchema = z.object({
   args: z.record(z.unknown()).optional(),
@@ -97,9 +98,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ fn:
   const argKeys = Object.keys(args);
   const values: unknown[] = Object.values(args);
 
-  // Build named argument list: fn(key => $1, key2 => $2)
+  // Build named argument list: schema.fn(key => $1, key2 => $2)
+  const schema = getProjectSchema(keyInfo.projectId);
   const argList = argKeys.map((k, i) => `${k} => $${i + 1}`).join(", ");
-  const sql = `SELECT * FROM ${fnSafe}(${argList})`;
+  const sql = `SELECT * FROM ${schema}.${fnSafe}(${argList})`;
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   const client = await pool.connect();
@@ -147,7 +149,8 @@ export async function HEAD(req: NextRequest, { params }: { params: Promise<{ fn:
   try {
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
     await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
-    const result = await client.query(`SELECT COUNT(*) FROM ${fnSafe}()`);
+    const headSchema = getProjectSchema(keyInfo.projectId);
+    const result = await client.query(`SELECT COUNT(*) FROM ${headSchema}.${fnSafe}()`);
     const count = result.rows[0].count;
     return new Response(null, { headers: { "X-Postbase-Count": count } });
   } catch {

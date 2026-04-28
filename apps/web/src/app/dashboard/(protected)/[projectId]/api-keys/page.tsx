@@ -7,6 +7,7 @@ import { KeyRow } from "./key-row";
 import { CopyButton } from "./copy-button";
 import { PageHeader } from "../_components/page-header";
 import { CodeBlock } from "../_components/code-block";
+import { getProjectSchema } from "@/lib/project-db";
 
 export default async function ApiKeysPage({
   params,
@@ -23,6 +24,13 @@ export default async function ApiKeysPage({
     .limit(1);
 
   if (!project) notFound();
+
+  const schema = getProjectSchema(projectId);
+  const rawDbUrl = project.databaseUrl ?? process.env.DATABASE_URL ?? "";
+  // Append search_path so clients land in the right schema by default
+  const dbConnectionString = rawDbUrl
+    ? `${rawDbUrl}${rawDbUrl.includes("?") ? "&" : "?"}options=-c%20search_path%3D${schema}%2Cpublic`
+    : null;
 
   return (
     <div className="flex flex-col h-full">
@@ -79,6 +87,24 @@ export default async function ApiKeysPage({
               type="service_role"
               badge="secret"
             />
+
+            {dbConnectionString && (
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-medium text-zinc-200">DB Connection String</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-950 text-red-400">secret</span>
+                </div>
+                <p className="text-xs text-zinc-500 mb-2">Direct PostgreSQL connection string scoped to this project&apos;s schema. Server-side only — never expose client-side.</p>
+                <div className="flex items-start gap-2">
+                  <code className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-xs text-zinc-300 font-mono break-all">
+                    DB_CONNECTION_STRING={dbConnectionString}
+                  </code>
+                  <div className="shrink-0">
+                    <CopyButton value={`DB_CONNECTION_STRING=${dbConnectionString}`} />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mt-6 pt-4 border-t border-zinc-800">

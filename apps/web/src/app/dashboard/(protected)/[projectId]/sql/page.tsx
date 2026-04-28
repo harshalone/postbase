@@ -23,6 +23,8 @@ import {
   Trash2,
   Info,
   AlertTriangle,
+  Copy,
+  FileText,
 } from "lucide-react";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
@@ -96,15 +98,18 @@ export default function SqlEditorPage({
   // "View running queries" panel
   const [showRunning, setShowRunning] = useState(false);
 
-  // Copied state for export
-  const [exported, setExported] = useState(false);
+  // Export dropdown
+  const [exportOpen, setExportOpen] = useState(false);
+  const [copiedFormat, setCopiedFormat] = useState<"md" | "json" | null>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   // Destructive command confirmation modal
   const [confirmModal, setConfirmModal] = useState(false);
   const [pendingSql, setPendingSql] = useState<string | null>(null);
 
-  // Info banner visibility
-  const [showInfo, setShowInfo] = useState(true);
+  // Info popover
+  const [infoOpen, setInfoOpen] = useState(false);
+  const infoRef = useRef<HTMLDivElement>(null);
 
   // Resizable results panel
   const [resultsHeight, setResultsHeight] = useState(260);
@@ -112,6 +117,41 @@ export default function SqlEditorPage({
   const mainRef = useRef<HTMLDivElement>(null);
 
   const result = results[activeId] ?? null;
+
+  // ─── Click-outside: close export dropdown and info popover ────────────────
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false);
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) setInfoOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // ─── Copy helpers ──────────────────────────────────────────────────────────
+
+  function copyAsJson() {
+    if (!result?.rows) return;
+    navigator.clipboard.writeText(JSON.stringify(result.rows, null, 2));
+    setCopiedFormat("json");
+    setExportOpen(false);
+    setTimeout(() => setCopiedFormat(null), 2000);
+  }
+
+  function copyAsMarkdown() {
+    if (!result?.rows || !result.fields) return;
+    const cols = result.fields.map((f) => f.name);
+    const header = `| ${cols.join(" | ")} |`;
+    const sep = `| ${cols.map(() => "---").join(" | ")} |`;
+    const rows = result.rows.map(
+      (row) => `| ${cols.map((c) => String(row[c] ?? "")).join(" | ")} |`
+    );
+    navigator.clipboard.writeText([header, sep, ...rows].join("\n"));
+    setCopiedFormat("md");
+    setExportOpen(false);
+    setTimeout(() => setCopiedFormat(null), 2000);
+  }
 
   // ─── Resizable divider ─────────────────────────────────────────────────────
 
@@ -309,8 +349,6 @@ export default function SqlEditorPage({
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = `${activeTab.name.replace(/\s+/g, "_")}.csv`;
     a.click();
-    setExported(true);
-    setTimeout(() => setExported(false), 2000);
   }
 
   // ─── Sidebar query filter ──────────────────────────────────────────────────
@@ -328,20 +366,27 @@ export default function SqlEditorPage({
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-zinc-950 relative">
-      {/* ── Navbar info banner (absolutely positioned over the page header) ── */}
-      {showInfo && (
-        <div className="absolute top-0 left-0 right-0 z-30 flex items-center gap-3 px-5 h-14 bg-blue-950/95 backdrop-blur-sm border-b border-blue-900/60">
-          <Info size={12} className="text-blue-400 shrink-0" />
-          <p className="flex-1 text-xs text-blue-300/90 leading-relaxed truncate">
-            <span className="font-medium text-blue-200">Schema-aware SQL runner — </span>
-            Queries use <code className="text-blue-300 bg-blue-900/50 px-1 rounded">search_path</code> so unqualified tables work.{" "}
-            <span className="text-yellow-300/80">Trigger bodies</span> run on a separate connection — the editor auto-injects <code className="text-blue-300 bg-blue-900/50 px-1 rounded">SET search_path</code> into function bodies, or use <code className="text-blue-300 bg-blue-900/50 px-1 rounded">TG_TABLE_SCHEMA</code> with <code className="text-blue-300 bg-blue-900/50 px-1 rounded">EXECUTE format()</code>.
-          </p>
-          <button onClick={() => setShowInfo(false)} className="cursor-pointer text-blue-500 hover:text-blue-300 shrink-0 transition-colors">
-            <X size={13} />
-          </button>
-        </div>
-      )}
+      {/* ── Info icon popover ── */}
+      <div ref={infoRef} className="absolute top-3 right-4 z-30">
+        <button
+          onClick={() => setInfoOpen((v) => !v)}
+          title="SQL runner info"
+          className={`cursor-pointer p-1.5 rounded transition-colors ${infoOpen ? "text-blue-400 bg-blue-950" : "text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800"}`}
+        >
+          <Info size={13} />
+        </button>
+        {infoOpen && (
+          <div className="absolute right-0 top-full mt-1 w-80 bg-zinc-900 border border-blue-900/60 rounded-xl shadow-2xl p-4 text-xs text-blue-300/90 leading-relaxed">
+            <p className="font-medium text-blue-200 mb-2">Schema-aware SQL runner</p>
+            <p className="mb-1.5">
+              Queries run with <code className="text-blue-300 bg-blue-900/50 px-1 rounded">search_path</code> set to your project schema, so unqualified table names work.
+            </p>
+            <p className="text-zinc-400">
+              <span className="text-yellow-300/80">Trigger bodies</span> fire on a separate connection — the editor auto-injects <code className="text-blue-300 bg-blue-900/50 px-1 rounded">SET search_path</code> into function bodies. Alternatively use <code className="text-blue-300 bg-blue-900/50 px-1 rounded">TG_TABLE_SCHEMA</code> with <code className="text-blue-300 bg-blue-900/50 px-1 rounded">EXECUTE format()</code>.
+            </p>
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-1 overflow-hidden">
       {/* ── Left Sidebar ── */}
@@ -579,15 +624,44 @@ export default function SqlEditorPage({
 
             {/* Right: actions + run */}
             <div className="flex items-center gap-2">
-              {/* Export CSV */}
-              <button
-                onClick={exportCsv}
-                disabled={!result || !!result.error || !result.rows || result.rows.length === 0}
-                title="Export as CSV"
-                className="cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-              >
-                {exported ? <Check size={13} className="text-green-400" /> : <Download size={13} />}
-              </button>
+              {/* Export dropdown */}
+              <div ref={exportRef} className="relative">
+                <button
+                  onClick={() => setExportOpen((v) => !v)}
+                  disabled={!result || !!result.error || !result.rows || result.rows.length === 0}
+                  className="cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 transition-colors"
+                >
+                  {copiedFormat ? <Check size={12} className="text-green-400" /> : <Download size={12} />}
+                  Export
+                  <ChevronDown size={10} className="text-zinc-600" />
+                </button>
+                {exportOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-52 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl py-1 z-20">
+                    <button
+                      onClick={copyAsMarkdown}
+                      className="cursor-pointer w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+                    >
+                      <span className="flex items-center gap-2"><FileText size={12} className="text-zinc-500" /> Copy as Markdown</span>
+                      <kbd className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 rounded">⇧⌘M</kbd>
+                    </button>
+                    <button
+                      onClick={copyAsJson}
+                      className="cursor-pointer w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+                    >
+                      <span className="flex items-center gap-2"><Copy size={12} className="text-zinc-500" /> Copy as JSON</span>
+                      <kbd className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 rounded">⇧⌘J</kbd>
+                    </button>
+                    <div className="my-1 border-t border-zinc-800" />
+                    <button
+                      onClick={() => { exportCsv(); setExportOpen(false); }}
+                      className="cursor-pointer w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+                    >
+                      <span className="flex items-center gap-2"><Download size={12} className="text-zinc-500" /> Download CSV</span>
+                      <kbd className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 rounded">⇧⌘D</kbd>
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Favorite / save */}
               <button
