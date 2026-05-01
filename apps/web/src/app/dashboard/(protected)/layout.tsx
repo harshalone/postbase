@@ -10,9 +10,14 @@ export default async function ProtectedDashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [existing] = await db.select({ id: adminUsers.id }).from(adminUsers).limit(1);
-  if (!existing) {
-    redirect("/setup");
+  try {
+    const [existing] = await db.select({ id: adminUsers.id }).from(adminUsers).limit(1);
+    if (!existing) {
+      redirect("/setup");
+    }
+  } catch (error) {
+    console.error("[ProtectedDashboardLayout] Database error:", error);
+    throw error;
   }
 
   const session = await auth();

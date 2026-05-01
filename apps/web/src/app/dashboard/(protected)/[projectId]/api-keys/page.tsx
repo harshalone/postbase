@@ -111,7 +111,7 @@ export default async function ApiKeysPage({
             <p className="text-xs text-zinc-500 mb-2">SDK Initialization</p>
             <CodeBlock
               language="typescript"
-              code={`import { createClient } from '@postbase/client'
+              code={`import { createClient } from 'postbasejs'
 
 // Anon client (browser-safe, respects RLS)
 const postbase = createClient(

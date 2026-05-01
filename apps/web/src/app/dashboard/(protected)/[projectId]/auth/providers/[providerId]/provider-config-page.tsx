@@ -19,6 +19,7 @@ interface Props {
   provider: Provider;
   projectId: string;
   existing: ExistingConfig | null;
+  baseUrl: string;
 }
 
 const PROVIDER_META: Record<
@@ -317,8 +318,8 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function CallbackUrlBox({ providerId, projectId, hint }: { providerId: string; projectId: string; hint?: string }) {
-  const callbackPathPlaceholder = `/api/auth/v1/${projectId}/oauth/callback/${providerId}`;
+function CallbackUrlBox({ providerId, projectId, baseUrl, hint }: { providerId: string; projectId: string; baseUrl: string; hint?: string }) {
+  const callbackUrl = `${baseUrl}/api/auth/v1/${projectId}/oauth/callback/${providerId}`;
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-3 space-y-2">
@@ -327,8 +328,8 @@ function CallbackUrlBox({ providerId, projectId, hint }: { providerId: string; p
         {hint ?? "Copy this URL and paste it as the authorized redirect URI in your OAuth app settings."}
       </p>
       <div className="flex items-center gap-2 rounded-md bg-zinc-800 px-3 py-2">
-        <p className="text-xs font-mono text-zinc-200 break-all flex-1">{callbackPathPlaceholder}</p>
-        <CopyButton text={callbackPathPlaceholder} />
+        <p className="text-xs font-mono text-zinc-200 break-all flex-1">{callbackUrl}</p>
+        <CopyButton text={callbackUrl} />
       </div>
     </div>
   );
@@ -617,7 +618,7 @@ function SignInPreview({ providerId, enabled }: { providerId: string; enabled: b
   );
 }
 
-export function ProviderConfigPage({ provider, projectId, existing }: Props) {
+export function ProviderConfigPage({ provider, projectId, existing, baseUrl }: Props) {
   const backUrl = `/dashboard/${projectId}/auth`;
 
   const meta = PROVIDER_META[provider.id] ?? { fields: [] };
@@ -810,7 +811,7 @@ export function ProviderConfigPage({ provider, projectId, existing }: Props) {
         )}
 
         {needsOAuthCreds && (
-          <CallbackUrlBox providerId={provider.id} projectId={projectId} hint={meta.callbackHint} />
+          <CallbackUrlBox providerId={provider.id} projectId={projectId} baseUrl={baseUrl} hint={meta.callbackHint} />
         )}
 
         <div className="flex items-center gap-3 pt-2">
