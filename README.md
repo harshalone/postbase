@@ -171,25 +171,26 @@ docker compose up -d
 
 ---
 
-## Connect your Next.js app
+## Connect your app
 
 ### Install the SDK
 
 ```bash
-npm install @postbase/client
+npm install postbasejs
 # or
-pnpm add @postbase/client
+pnpm add postbasejs
 ```
 
 ### Initialize the client
 
 ```ts
 // lib/postbase.ts
-import { createClient } from '@postbase/client'
+import { createClient } from 'postbasejs'
 
 export const postbase = createClient(
-  'http://localhost:3000',  // your Postbase instance URL
-  'pb_anon_...'             // your anon key (safe for browser)
+  'http://localhost:3000',       // your Postbase instance URL
+  'pb_anon_...',                 // your anon key (safe for browser)
+  { projectId: 'your-project-id' }
 )
 ```
 
@@ -199,27 +200,74 @@ For server-side / admin operations use your `service_role` key — keep it out o
 
 ## Usage
 
-### Auth
+### Auth — email + password
 
 ```ts
-// Sign in with any enabled provider
-await postbase.auth.signIn('google')
-await postbase.auth.signIn('github')
+await postbase.auth.signUp({ email: 'user@example.com', password: 'secret' })
 
-// Email + password
-await postbase.auth.signUp('user@example.com', 'password')
-await postbase.auth.signIn('credentials', { email, password })
+const { data, error } = await postbase.auth.signInWithPassword({
+  email: 'user@example.com',
+  password: 'secret',
+})
 
-// Get the current session
-const session = await postbase.auth.getSession()
-
-// Sign out
 await postbase.auth.signOut()
 
-// Listen to auth state changes
-const unsubscribe = postbase.auth.onAuthStateChange((session) => {
-  console.log(session?.user)
+const { data: { session } } = await postbase.auth.getSession()
+
+postbase.auth.onAuthStateChange((event, session) => {
+  console.log(event, session?.user)
 })
+```
+
+### Auth — OAuth (browser / web)
+
+```ts
+// Redirects browser to the provider, then back to your redirectTo URL
+await postbase.auth.signInWithOAuth({
+  provider: 'google', // 'github', 'discord', 'apple', etc.
+  options: { redirectTo: 'https://yourapp.com/callback' },
+})
+
+// On your callback page — parses tokens from the URL automatically
+const { data, error } = await postbase.auth.handleOAuthCallback()
+```
+
+### Auth — OAuth (native iOS / Android — custom URL scheme)
+
+Use an in-app browser (`ASWebAuthenticationSession` on iOS, Chrome Custom Tab on Android) with a custom URL scheme as the redirect target:
+
+```ts
+// Returns the authorize URL for you to open in an in-app browser
+const authorizeUrl = await postbase.auth.signInWithOAuth({
+  provider: 'github',
+  options: { redirectTo: 'com.myapp://auth/callback' },
+})
+// → open authorizeUrl in ASWebAuthenticationSession / Chrome Custom Tab
+
+// After the in-app browser hands the URL back to your app:
+const { data, error } = await postbase.auth.handleOAuthCallback({
+  url: incomingUrl, // e.g. 'com.myapp://auth/callback?access_token=...'
+})
+```
+
+### Auth — Apple / Google native SDK (no browser at all)
+
+For apps that use `ASAuthorizationController` (Apple) or `GIDSignIn` (Google), pass the `id_token` directly — no browser, no redirect:
+
+```ts
+// Apple (Swift → bridge identityToken string to JS)
+const { data, error } = await postbase.auth.signInWithIdToken({
+  provider: 'apple',
+  idToken: appleIdentityToken,
+  nonce: nonce, // optional, if you passed one to ASAuthorizationAppleIDRequest
+})
+
+// Google (Android / iOS)
+const { data, error } = await postbase.auth.signInWithIdToken({
+  provider: 'google',
+  idToken: googleIdToken,
+})
+// data.session.accessToken, data.session.refreshToken, data.user
 ```
 
 ### Database
@@ -228,7 +276,7 @@ const unsubscribe = postbase.auth.onAuthStateChange((session) => {
 // SELECT
 const { data, error } = await postbase
   .from('posts')
-  .select('id', 'title', 'created_at')
+  .select('id, title, created_at')
   .eq('user_id', userId)
   .order('created_at', { ascending: false })
   .limit(10)
@@ -237,19 +285,14 @@ const { data, error } = await postbase
 const { data } = await postbase
   .from('posts')
   .insert({ title: 'Hello world', user_id: userId })
-  .returning()
+  .select()
+  .single()
 
 // UPDATE
-await postbase
-  .from('posts')
-  .update({ title: 'Updated' })
-  .eq('id', postId)
+await postbase.from('posts').update({ title: 'Updated' }).eq('id', postId)
 
 // DELETE
-await postbase
-  .from('posts')
-  .delete()
-  .eq('id', postId)
+await postbase.from('posts').delete().eq('id', postId)
 ```
 
 > **anon key** — enforces Row Level Security policies on your tables.
@@ -265,7 +308,7 @@ const { data, error } = await postbase
   .upload('user-123/avatar.png', file)
 
 // Get a public URL
-const url = postbase.storage.from('avatars').getPublicUrl('user-123/avatar.png')
+const { data: { publicUrl } } = postbase.storage.from('avatars').getPublicUrl('user-123/avatar.png')
 
 // Download
 const { data: blob } = await postbase.storage.from('avatars').download('user-123/avatar.png')
@@ -290,6 +333,8 @@ Enable any of these from the dashboard — no code changes needed.
 | Passwordless | Passkeys (WebAuthn), Anonymous/Guest |
 | Enterprise | SAML/SSO, Okta, Keycloak, Auth0 |
 
+**Apple and Google** additionally support a **native id_token flow** — iOS/macOS/Android apps can sign users in via the OS native SDK (no browser required) using `signInWithIdToken()` in the JS SDK.
+
 ---
 
 ## Environment Variables
@@ -310,7 +355,6 @@ Enable any of these from the dashboard — no code changes needed.
 - [Auth.js v5](https://authjs.dev) — auth provider handling
 - [Drizzle ORM](https://orm.drizzle.team) — database schema & queries
 - [PostgreSQL 16](https://postgresql.org) — primary database
-- [MinIO](https://min.io) — S3-compatible object storage
 - [Docker](https://docker.com) — containerized deployment
 
 ---

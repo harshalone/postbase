@@ -4,6 +4,24 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId } = await params;
+
+  const [deleted] = await db
+    .delete(projects)
+    .where(eq(projects.id, projectId))
+    .returning({ id: projects.id });
+
+  if (!deleted) {
+    return Response.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  return Response.json({ success: true });
+}
+
 const schema = z.object({
   name: z.string().min(1).max(100),
 });

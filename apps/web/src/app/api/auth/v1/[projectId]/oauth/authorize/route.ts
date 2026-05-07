@@ -25,6 +25,7 @@ import { getBaseUrl } from "@/lib/get-base-url";
 
 // Map provider names to their OAuth authorization URLs
 const PROVIDER_AUTH_URLS: Record<string, string> = {
+  apple: "https://appleid.apple.com/auth/authorize",
   github: "https://github.com/login/oauth/authorize",
   google: "https://accounts.google.com/o/oauth2/v2/auth",
   discord: "https://discord.com/api/oauth2/authorize",
@@ -38,6 +39,7 @@ const PROVIDER_AUTH_URLS: Record<string, string> = {
 
 // Default scopes per provider
 const PROVIDER_DEFAULT_SCOPES: Record<string, string> = {
+  apple: "name email",
   github: "read:user user:email",
   google: "openid email profile",
   discord: "identify email",
@@ -143,6 +145,12 @@ export async function GET(
   if (provider === "google") {
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
+  }
+
+  // Apple requires response_mode=form_post so the callback receives code+state
+  // as a POST body rather than query params (required by Apple's spec).
+  if (provider === "apple") {
+    authUrl.searchParams.set("response_mode", "form_post");
   }
 
   return new Response(null, {

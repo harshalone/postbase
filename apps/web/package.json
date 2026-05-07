@@ -27,6 +27,7 @@
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.1",
+    "jose": "^6.0.0",
     "lucide-react": "^0.460.0",
     "nanoid": "^5.0.0",
     "next": "^16.1.6",

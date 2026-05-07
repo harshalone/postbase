@@ -59,6 +59,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.1
         version: 0.45.1(@types/pg@8.18.0)(pg@8.20.0)
+      jose:
+        specifier: ^6.0.0
+        version: 6.2.1
       lucide-react:
         specifier: ^0.460.0
         version: 0.460.0(react@19.2.4)

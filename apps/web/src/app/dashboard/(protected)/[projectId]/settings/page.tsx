@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { PageHeader } from "../_components/page-header";
 import { GeneralSettingsForm } from "./general-settings-form";
+import { DeleteProjectDialog } from "./delete-project-dialog";
 
 export default async function SettingsPage({
   params,
@@ -70,12 +71,10 @@ export default async function SettingsPage({
                   Permanently delete this project, all users, and all data. This cannot be undone.
                 </p>
               </div>
-              <button
-                disabled
-                className="cursor-not-allowed px-4 py-2 rounded-lg border border-red-800 text-red-400 text-sm font-medium opacity-50 shrink-0 ml-6"
-              >
-                Delete Project
-              </button>
+              <DeleteProjectDialog
+                projectId={project.id}
+                projectName={project.name}
+              />
             </div>
           </section>
 
