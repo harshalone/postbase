@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { db } from "@/lib/db";
 import { organisations, projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { CreateOrgDialog } from "../../create-org-dialog";
 import { CreateProjectDialog } from "../../create-project-dialog";
 import { EditOrgDialog } from "../../edit-org-dialog";
+import { ProjectCard } from "../../project-card";
 
 export default async function DashboardPage() {
   const allOrgs = await db.select().from(organisations).orderBy(organisations.createdAt);
@@ -62,19 +62,12 @@ export default async function DashboardPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {ps.map((project) => (
-                  <Link
+                  <ProjectCard
                     key={project.id}
-                    href={`/dashboard/${project.id}`}
-                    className="cursor-pointer group rounded-lg border border-zinc-800 bg-zinc-950 hover:border-zinc-600 hover:bg-zinc-800/50 p-4 transition-all"
-                  >
-                    <p className="font-medium text-zinc-100 group-hover:text-white text-sm">
-                      {project.name}
-                    </p>
-                    <p className="text-xs text-zinc-500 mt-1">{project.slug}</p>
-                    <p className="text-xs text-zinc-600 mt-3 group-hover:text-zinc-500 transition-colors">
-                      Open project →
-                    </p>
-                  </Link>
+                    projectId={project.id}
+                    name={project.name}
+                    slug={project.slug}
+                  />
                 ))}
               </div>
             )}
