@@ -6,8 +6,29 @@ import { getProjectPool, getProjectSchema } from "@/lib/project-db";
 
 type ScheduledTask = nodeCron.ScheduledTask;
 
+const HTTP_PREFIX = "__http__:";
+
+type HttpJobConfig = {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+};
+
 // Map of jobId → active node-cron task
 const tasks = new Map<string, ScheduledTask>();
+
+async function runHttpJob(cfg: HttpJobConfig): Promise<string> {
+  const init: RequestInit = {
+    method: cfg.method,
+    headers: cfg.headers,
+  };
+  if (cfg.body && cfg.method !== "GET" && cfg.method !== "DELETE") {
+    init.body = cfg.body;
+  }
+  const res = await fetch(cfg.url, init);
+  return `${res.status} ${res.statusText}`;
+}
 
 async function runJob(
   jobId: string,
@@ -24,14 +45,19 @@ async function runJob(
   let returnMessage: string | null = null;
 
   try {
-    const pool = getProjectPool(databaseUrl);
-    const client = await pool.connect();
-    try {
-      const schema = getProjectSchema(projectId);
-      await client.query(`SET LOCAL search_path TO "${schema}", public`);
-      await client.query(command);
-    } finally {
-      client.release();
+    if (command.startsWith(HTTP_PREFIX)) {
+      const cfg = JSON.parse(command.slice(HTTP_PREFIX.length)) as HttpJobConfig;
+      returnMessage = await runHttpJob(cfg);
+    } else {
+      const pool = getProjectPool(databaseUrl);
+      const client = await pool.connect();
+      try {
+        const schema = getProjectSchema(projectId);
+        await client.query(`SET LOCAL search_path TO "${schema}", public`);
+        await client.query(command);
+      } finally {
+        client.release();
+      }
     }
   } catch (err) {
     status = "failed";

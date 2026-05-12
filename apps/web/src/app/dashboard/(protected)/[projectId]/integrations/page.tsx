@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  Minus,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -64,6 +65,55 @@ type QueueMessage = {
 
 type Tab = "cron" | "queues";
 type JobType = "sql" | "http";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+type HttpConfig = {
+  method: HttpMethod;
+  url: string;
+  headers: { key: string; value: string }[];
+  body: string;
+};
+
+const HTTP_PREFIX = "__http__:";
+
+function serializeHttpConfig(cfg: HttpConfig): string {
+  const headers: Record<string, string> = {};
+  for (const h of cfg.headers) {
+    if (h.key.trim()) headers[h.key.trim()] = h.value;
+  }
+  return HTTP_PREFIX + JSON.stringify({
+    method: cfg.method,
+    url: cfg.url,
+    headers,
+    body: cfg.body,
+  });
+}
+
+function parseHttpConfig(command: string): HttpConfig | null {
+  if (!command.startsWith(HTTP_PREFIX)) return null;
+  try {
+    const raw = JSON.parse(command.slice(HTTP_PREFIX.length)) as {
+      method: HttpMethod;
+      url: string;
+      headers: Record<string, string>;
+      body: string;
+    };
+    return {
+      method: raw.method ?? "POST",
+      url: raw.url ?? "",
+      headers: Object.entries(raw.headers ?? {}).map(([key, value]) => ({ key, value })),
+      body: raw.body ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function describeCommand(command: string): string {
+  const http = parseHttpConfig(command);
+  if (http) return `${http.method} ${http.url}`;
+  return command;
+}
 
 // ─── Cron schedule presets ────────────────────────────────────────────────────
 
@@ -156,6 +206,8 @@ function NotInstalled({
 
 // ─── Cron Job Dialog (Create / Edit) ─────────────────────────────────────────
 
+const HTTP_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+
 function CronJobDialog({
   initial,
   onClose,
@@ -171,8 +223,44 @@ function CronJobDialog({
   const [name, setName] = useState(initial?.name ?? "");
   const [schedule, setSchedule] = useState(initial?.schedule ?? "*/5 * * * *");
   const [type, setType] = useState<JobType>(initial?.type ?? "sql");
-  const [command, setCommand] = useState(initial?.command ?? "");
   const [showSyntax, setShowSyntax] = useState(false);
+
+  // SQL state
+  const [sqlCommand, setSqlCommand] = useState(
+    initial?.type === "sql" ? (initial?.command ?? "") : ""
+  );
+
+  // HTTP state — parse from command if editing an http job
+  const initialHttp = initial?.type === "http" ? parseHttpConfig(initial.command) : null;
+  const [httpMethod, setHttpMethod] = useState<HttpMethod>(initialHttp?.method ?? "POST");
+  const [httpUrl, setHttpUrl] = useState(initialHttp?.url ?? "");
+  const [httpHeaders, setHttpHeaders] = useState<{ key: string; value: string }[]>(
+    initialHttp?.headers ?? [{ key: "", value: "" }]
+  );
+  const [httpBody, setHttpBody] = useState(initialHttp?.body ?? "");
+
+  function addHeader() {
+    setHttpHeaders((h) => [...h, { key: "", value: "" }]);
+  }
+
+  function removeHeader(i: number) {
+    setHttpHeaders((h) => h.filter((_, idx) => idx !== i));
+  }
+
+  function updateHeader(i: number, field: "key" | "value", val: string) {
+    setHttpHeaders((h) => h.map((row, idx) => idx === i ? { ...row, [field]: val } : row));
+  }
+
+  function buildCommand(): string {
+    if (type === "sql") return sqlCommand;
+    return serializeHttpConfig({ method: httpMethod, url: httpUrl, headers: httpHeaders, body: httpBody });
+  }
+
+  const isValid = name.trim() && (
+    type === "sql" ? sqlCommand.trim() : httpUrl.trim()
+  );
+
+  const showBody = type === "http" && httpMethod !== "GET" && httpMethod !== "DELETE";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -249,7 +337,6 @@ function CronJobDialog({
                 View syntax chart
               </button>
 
-              {/* Visual */}
               {showSyntax && (
                 <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-5 py-4">
                   <p className="text-xs text-zinc-500 mb-3 font-medium uppercase tracking-wider">Schedule (GMT)</p>
@@ -257,7 +344,6 @@ function CronJobDialog({
                 </div>
               )}
 
-              {/* Always show description */}
               {!showSyntax && (
                 <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3">
                   <p className="text-sm text-zinc-400">{describeCron(schedule)}</p>
@@ -304,33 +390,107 @@ function CronJobDialog({
               </div>
             </div>
 
-            {/* Command / URL */}
-            <div>
-              <label className="text-sm text-zinc-300 font-medium block mb-1.5">
-                {type === "sql" ? "SQL Snippet" : "HTTP Request URL"}
-              </label>
-              {type === "sql" ? (
+            {/* ── SQL fields ── */}
+            {type === "sql" && (
+              <div>
+                <label className="text-sm text-zinc-300 font-medium block mb-1.5">SQL Snippet</label>
                 <textarea
-                  value={command}
-                  onChange={(e) => setCommand(e.target.value)}
+                  value={sqlCommand}
+                  onChange={(e) => setSqlCommand(e.target.value)}
                   placeholder="select 1;"
                   rows={6}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 resize-none"
                 />
-              ) : (
-                <input
-                  value={command}
-                  onChange={(e) => setCommand(e.target.value)}
-                  placeholder="https://example.com/webhook"
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
-                />
-              )}
-              {type === "sql" && (
                 <p className="text-xs text-zinc-600 mt-1">
                   Unqualified table names resolve to your project schema automatically.
                 </p>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* ── HTTP fields ── */}
+            {type === "http" && (
+              <div className="space-y-4">
+                {/* Method + URL */}
+                <div>
+                  <label className="text-sm text-zinc-300 font-medium block mb-1.5">Request</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={httpMethod}
+                      onChange={(e) => setHttpMethod(e.target.value as HttpMethod)}
+                      className="cursor-pointer bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500 shrink-0"
+                    >
+                      {HTTP_METHODS.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <input
+                      value={httpUrl}
+                      onChange={(e) => setHttpUrl(e.target.value)}
+                      placeholder="https://example.com/webhook"
+                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Headers */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-sm text-zinc-300 font-medium">Headers</label>
+                    <button
+                      onClick={addHeader}
+                      className="cursor-pointer flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 transition-colors"
+                    >
+                      <Plus size={11} />
+                      Add header
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {httpHeaders.map((h, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <input
+                          value={h.key}
+                          onChange={(e) => updateHeader(i, "key", e.target.value)}
+                          placeholder="Header name"
+                          className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+                        />
+                        <input
+                          value={h.value}
+                          onChange={(e) => updateHeader(i, "value", e.target.value)}
+                          placeholder="Value"
+                          className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500"
+                        />
+                        <button
+                          onClick={() => removeHeader(i)}
+                          className="cursor-pointer p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors shrink-0"
+                        >
+                          <Minus size={13} />
+                        </button>
+                      </div>
+                    ))}
+                    {httpHeaders.length === 0 && (
+                      <p className="text-xs text-zinc-600">No headers. <button onClick={addHeader} className="cursor-pointer text-brand-400 hover:text-brand-300">Add one</button></p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Body */}
+                {showBody && (
+                  <div>
+                    <label className="text-sm text-zinc-300 font-medium block mb-1.5">Body</label>
+                    <textarea
+                      value={httpBody}
+                      onChange={(e) => setHttpBody(e.target.value)}
+                      placeholder='{"key": "value"}'
+                      rows={5}
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 resize-none"
+                    />
+                    <p className="text-xs text-zinc-600 mt-1">
+                      Raw body content. Add a Content-Type header if needed.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -343,8 +503,8 @@ function CronJobDialog({
             Cancel
           </button>
           <button
-            onClick={() => onSave({ name, schedule, command, type })}
-            disabled={!name.trim() || !command.trim() || saving}
+            onClick={() => onSave({ name, schedule, command: buildCommand(), type })}
+            disabled={!isValid || saving}
             className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
           >
             {saving ? "Saving…" : isEdit ? "Save changes" : "Create job"}
@@ -441,19 +601,14 @@ export default function IntegrationsPage({
     }
   }
 
-  // Detect job type from command string
   function detectType(command: string): JobType {
-    return command.trim().toLowerCase().startsWith("select net.http") ? "http" : "sql";
+    return command.startsWith(HTTP_PREFIX) ? "http" : "sql";
   }
 
   async function saveJob(v: { name: string; schedule: string; command: string; type: JobType }) {
     setSavingJob(true);
     try {
-      // For HTTP type, wrap in net.http_post call if it looks like a plain URL
-      let cmd = v.command.trim();
-      if (v.type === "http" && !cmd.startsWith("select")) {
-        cmd = `select net.http_post(url:='${cmd}')`;
-      }
+      const cmd = v.command;
 
       if (editingJob) {
         // Edit: delete old + create new with same name
@@ -741,7 +896,7 @@ export default function IntegrationsPage({
                               <span className="text-zinc-700">—</span>
                             </td>
                             <td className="px-4 py-3 max-w-xs">
-                              <code className="text-xs text-zinc-400 truncate block">{job.command}</code>
+                              <code className="text-xs text-zinc-400 truncate block">{describeCommand(job.command)}</code>
                             </td>
                             <td className="px-4 py-3">
                               {/* Toggle switch */}
