@@ -359,6 +359,20 @@ Enable any of these from the dashboard — no code changes needed.
 
 ---
 
+## Claude Code Skill
+
+A Claude Code skill is bundled at [`skills/postbase/SKILL.md`](skills/postbase/SKILL.md).
+
+It covers the full Postbase API reference, postbasejs SDK patterns, RLS, auth tables, cron jobs, storage, and Swift integration — loaded automatically when you use `/postbase` in Claude Code, or activated whenever Claude detects you're building against a Postbase backend.
+
+To install it in your own project:
+
+```bash
+cp skills/postbase/SKILL.md <your-project>/.claude/skills/postbase/SKILL.md
+```
+
+---
+
 ## License
 
 MIT
