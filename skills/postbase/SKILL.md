@@ -544,7 +544,19 @@ CREATE POLICY "own posts" ON posts
 
 ## Cron Jobs (node-cron based)
 
-Postbase runs scheduled jobs via **node-cron** inside the Next.js server process (replaces pg_cron for Railway compatibility). Jobs execute SQL against the project's own database and are persisted in the `_postbase` schema.
+Postbase runs scheduled jobs via **node-cron** inside the Next.js server process (replaces pg_cron for Railway compatibility). Jobs are persisted in the `_postbase` schema and support two types: **SQL** (runs a query against the project DB) and **HTTP** (makes a real HTTP request via `fetch`).
+
+### Job types
+
+#### SQL jobs
+The `command` field contains raw SQL executed against the project's database with `search_path` set to the project schema.
+
+#### HTTP jobs
+The `command` field uses the prefix `__http__:` followed by a JSON payload:
+```
+__http__:{"method":"POST","url":"https://example.com/hook","headers":{"Authorization":"Bearer tok"},"body":"{\"key\":\"val\"}"}
+```
+The scheduler detects the prefix, calls `fetch()`, and records the HTTP response status (e.g. `200 OK`) as `return_message`. The body field is omitted for GET and DELETE requests.
 
 ### Schema
 
@@ -555,7 +567,7 @@ CREATE TABLE "_postbase"."cron_jobs" (
   "project_id" uuid NOT NULL REFERENCES "_postbase"."projects"("id") ON DELETE CASCADE,
   "name"       text NOT NULL,
   "schedule"   text NOT NULL,   -- standard 5-field cron expression
-  "command"    text NOT NULL,   -- SQL to run against the project DB
+  "command"    text NOT NULL,   -- SQL string, OR __http__:{...} for HTTP jobs
   "active"     boolean DEFAULT true NOT NULL,
   "created_at" timestamp DEFAULT now() NOT NULL,
   "updated_at" timestamp DEFAULT now() NOT NULL
@@ -568,7 +580,7 @@ CREATE TABLE "_postbase"."cron_job_runs" (
   "start_time"     timestamp DEFAULT now() NOT NULL,
   "end_time"       timestamp,
   "status"         text DEFAULT 'running' NOT NULL,  -- 'running' | 'succeeded' | 'failed'
-  "return_message" text   -- error message on failure
+  "return_message" text   -- HTTP status on success, error message on failure
 );
 ```
 
@@ -590,13 +602,24 @@ Authorization: Bearer <service_key>
 → { "ok": true }
 ```
 
-#### Create a job
+#### Create a SQL job
 ```json
 {
   "action": "create",
   "jobName": "cleanup-old-sessions",
   "schedule": "0 3 * * *",
   "command": "DELETE FROM sessions WHERE created_at < NOW() - INTERVAL '30 days'"
+}
+→ { "ok": true }
+```
+
+#### Create an HTTP job
+```json
+{
+  "action": "create",
+  "jobName": "ping-webhook",
+  "schedule": "*/5 * * * *",
+  "command": "__http__:{\"method\":\"POST\",\"url\":\"https://example.com/hook\",\"headers\":{\"Content-Type\":\"application/json\"},\"body\":\"{\\\"event\\\":\\\"heartbeat\\\"}\"}"
 }
 → { "ok": true }
 ```
@@ -632,10 +655,19 @@ await loadAllJobs()
 
 **Key behaviours:**
 - Jobs run inside the Next.js server process — no separate worker needed
-- Each run sets `search_path` to the project schema before executing SQL
+- SQL jobs set `search_path` to the project schema before executing
+- HTTP jobs use Node.js `fetch()` — response status recorded as `return_message`
 - Run history is capped at 100 entries per job (oldest pruned automatically)
 - `loadAllJobs()` is wired into `instrumentation.ts` so jobs survive server restarts
 - `nodeCron.validate(schedule)` is called before persisting — invalid expressions return `400`
+
+### UI behaviour (integrations page)
+
+The cron dialog exposes both job types cleanly:
+- **SQL**: textarea for the SQL snippet
+- **HTTP**: method selector (GET/POST/PUT/PATCH/DELETE) + URL + key/value headers editor + body textarea (hidden for GET/DELETE)
+
+The raw `__http__:` command string is never shown to the user — the table displays `METHOD url` and the edit panel reconstructs all fields from the stored JSON.
 
 ### Migration
 
