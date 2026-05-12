@@ -28,6 +28,31 @@ ALTER TABLE "_postbase"."audit_logs" DROP CONSTRAINT IF EXISTS "audit_logs_user_
 
 -- Remove user_column_defs from projects if it somehow didn't get applied
 ALTER TABLE "_postbase"."projects" ADD COLUMN IF NOT EXISTS "user_column_defs" jsonb DEFAULT '[]'::jsonb;
+
+-- Cron jobs (node-cron backed, replaces pg_cron)
+CREATE TABLE IF NOT EXISTS "_postbase"."cron_jobs" (
+  "id"          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "project_id"  uuid NOT NULL REFERENCES "_postbase"."projects"("id") ON DELETE CASCADE,
+  "name"        text NOT NULL,
+  "schedule"    text NOT NULL,
+  "command"     text NOT NULL,
+  "active"      boolean NOT NULL DEFAULT true,
+  "created_at"  timestamp NOT NULL DEFAULT now(),
+  "updated_at"  timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "cron_jobs_project_idx" ON "_postbase"."cron_jobs" ("project_id");
+CREATE INDEX IF NOT EXISTS "cron_jobs_project_name_idx" ON "_postbase"."cron_jobs" ("project_id", "name");
+
+CREATE TABLE IF NOT EXISTS "_postbase"."cron_job_runs" (
+  "id"              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "job_id"          uuid NOT NULL REFERENCES "_postbase"."cron_jobs"("id") ON DELETE CASCADE,
+  "start_time"      timestamp NOT NULL DEFAULT now(),
+  "end_time"        timestamp,
+  "status"          text NOT NULL DEFAULT 'running',
+  "return_message"  text
+);
+CREATE INDEX IF NOT EXISTS "cron_job_runs_job_idx" ON "_postbase"."cron_job_runs" ("job_id");
+CREATE INDEX IF NOT EXISTS "cron_job_runs_start_time_idx" ON "_postbase"."cron_job_runs" ("start_time");
 SQL
 echo "==> Migrations done."
 
