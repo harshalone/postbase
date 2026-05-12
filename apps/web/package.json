@@ -34,6 +34,7 @@
     "next-auth": "^5.0.0-beta.25",
     "next-swagger-doc": "^0.4.1",
     "nextjs-toploader": "^3.9.17",
+    "node-cron": "^4.2.1",
     "nodemailer": "^7.0.13",
     "otpauth": "^9.5.0",
     "pg": "^8.13.0",
@@ -50,6 +51,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^7.0.11",
     "@types/pg": "^8.11.0",
     "@types/pg-copy-streams": "^1.2.5",

@@ -236,6 +236,46 @@ export const sqlQueries = postbaseSchema.table(
   })
 );
 
+// ─── Cron jobs ────────────────────────────────────────────────────────────────
+
+export const cronJobs = postbaseSchema.table(
+  "cron_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    schedule: text("schedule").notNull(),
+    command: text("command").notNull(),
+    active: boolean("active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    projectIdx: index("cron_jobs_project_idx").on(t.projectId),
+    projectNameUnique: index("cron_jobs_project_name_idx").on(t.projectId, t.name),
+  })
+);
+
+export const cronJobRuns = postbaseSchema.table(
+  "cron_job_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => cronJobs.id, { onDelete: "cascade" }),
+    startTime: timestamp("start_time").defaultNow().notNull(),
+    endTime: timestamp("end_time"),
+    status: text("status").notNull().default("running"), // 'running' | 'succeeded' | 'failed'
+    returnMessage: text("return_message"),
+  },
+  (t) => ({
+    jobIdx: index("cron_job_runs_job_idx").on(t.jobId),
+    startTimeIdx: index("cron_job_runs_start_time_idx").on(t.startTime),
+  })
+);
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const organisationsRelations = relations(organisations, ({ many }) => ({
@@ -256,4 +296,20 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
     references: [emailSettings.projectId],
   }),
   emailTemplates: many(emailTemplates),
+  cronJobs: many(cronJobs),
+}));
+
+export const cronJobsRelations = relations(cronJobs, ({ one, many }) => ({
+  project: one(projects, {
+    fields: [cronJobs.projectId],
+    references: [projects.id],
+  }),
+  runs: many(cronJobRuns),
+}));
+
+export const cronJobRunsRelations = relations(cronJobRuns, ({ one }) => ({
+  job: one(cronJobs, {
+    fields: [cronJobRuns.jobId],
+    references: [cronJobs.id],
+  }),
 }));

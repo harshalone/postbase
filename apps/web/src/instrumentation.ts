@@ -26,4 +26,10 @@ export async function register() {
   } else if (process.env.AUTH_URL && !process.env.NEXTAUTH_URL) {
     process.env.NEXTAUTH_URL = process.env.AUTH_URL;
   }
+
+  // Only start the scheduler in the Node.js runtime (not edge), and only once.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { loadAllJobs } = await import("@/lib/scheduler");
+    await loadAllJobs();
+  }
 }

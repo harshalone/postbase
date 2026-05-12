@@ -425,11 +425,16 @@ export default function IntegrationsPage({
   async function installCron() {
     setInstallingCron(true);
     try {
-      await fetch(`/api/dashboard/${projectId}/cron`, {
+      const res = await fetch(`/api/dashboard/${projectId}/cron`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "install" }),
       });
+      const data = await res.json();
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
       await fetchCron();
     } finally {
       setInstallingCron(false);
