@@ -150,19 +150,65 @@ async function upload(req: NextRequest, params: Params, upsert: boolean) {
     if (!allowed) return Response.json({ error: "File type not allowed" }, { status: 415 });
   }
 
+  const contentLength = Number(req.headers.get("content-length") || "0");
+  if (bucket.fileSizeLimit && contentLength > bucket.fileSizeLimit) {
+    return Response.json({ error: `File too large. Max size: ${bucket.fileSizeLimit} bytes` }, { status: 413 });
+  }
+
   let body: Uint8Array;
   const formData = req.headers.get("content-type")?.includes("multipart/form-data");
 
-  if (formData) {
-    const form = await req.formData();
-    const file = form.get("file") as File | null;
-    if (!file) return Response.json({ error: "No file provided" }, { status: 400 });
-    body = new Uint8Array(await file.arrayBuffer());
+  if (bucket.fileSizeLimit && req.body) {
+    let bytesRead = 0;
+    const reader = req.body.getReader();
+    const chunks: Uint8Array[] = [];
+    
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytesRead += value.byteLength;
+        if (bytesRead > bucket.fileSizeLimit) {
+          return Response.json({ error: `File too large. Max size: ${bucket.fileSizeLimit} bytes` }, { status: 413 });
+        }
+        chunks.push(value);
+      }
+    } catch (err) {
+      return Response.json({ error: "Upload failed during streaming" }, { status: 500 });
+    }
+    
+    const combined = new Uint8Array(bytesRead);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    
+    if (formData) {
+      const newReq = new Request(req.url, {
+        method: req.method,
+        headers: req.headers,
+        body: combined
+      });
+      const form = await newReq.formData();
+      const file = form.get("file") as File | null;
+      if (!file) return Response.json({ error: "No file provided" }, { status: 400 });
+      body = new Uint8Array(await file.arrayBuffer());
+    } else {
+      body = combined;
+    }
   } else {
-    body = new Uint8Array(await req.arrayBuffer());
+    if (formData) {
+      const form = await req.formData();
+      const file = form.get("file") as File | null;
+      if (!file) return Response.json({ error: "No file provided" }, { status: 400 });
+      body = new Uint8Array(await file.arrayBuffer());
+    } else {
+      body = new Uint8Array(await req.arrayBuffer());
+    }
   }
 
-  // Check size limit
+  // Final sanity check
   if (bucket.fileSizeLimit && body.byteLength > bucket.fileSizeLimit) {
     return Response.json({ error: `File too large. Max size: ${bucket.fileSizeLimit} bytes` }, { status: 413 });
   }
