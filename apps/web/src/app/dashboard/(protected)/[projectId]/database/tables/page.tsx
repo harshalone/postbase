@@ -367,6 +367,37 @@ export default function DatabasePage({
   const [importDone, setImportDone] = useState(false);
   const importSqlInputRef = useRef<HTMLInputElement>(null);
 
+  // Import CSV panel
+  const importCsvPanel = useSlidePanel();
+  const showImportCsv = importCsvPanel.visible;
+  const [importCsvFileName, setImportCsvFileName] = useState<string | null>(null);
+  const [importCsvFileSize, setImportCsvFileSize] = useState<number>(0);
+  const importCsvFileRef = useRef<File | null>(null);
+  const [importCsvDragging, setImportCsvDragging] = useState(false);
+  const [importCsvReading, setImportCsvReading] = useState(false);
+  const [importCsvReadProgress, setImportCsvReadProgress] = useState(0);
+  const importCsvInputRef = useRef<HTMLInputElement>(null);
+  const [importCsvTargetTable, setImportCsvTargetTable] = useState<string>("");
+  const [importCsvHeaders, setImportCsvHeaders] = useState<string[]>([]);
+  const [importCsvColumnMap, setImportCsvColumnMap] = useState<Record<string, string>>({});
+  const [importCsvPreviewRows, setImportCsvPreviewRows] = useState<string[][]>([]);
+  const [importCsvParsedRows, setImportCsvParsedRows] = useState<Record<string, string>[]>([]);
+
+  type CsvImportBatch = {
+    id: number;
+    label: string;
+    rows: Record<string, string>[];
+    status: "pending" | "running" | "done" | "error";
+    error?: string;
+  };
+  const [importCsvBatches, setImportCsvBatches] = useState<CsvImportBatch[]>([]);
+  const [importCsvRunning, setImportCsvRunning] = useState(false);
+  const [importCsvDone, setImportCsvDone] = useState(false);
+  const importCsvAbortRef = useRef<boolean>(false);
+  const [importDropdownOpen, setImportDropdownOpen] = useState(false);
+  const importDropdownRef = useRef<HTMLDivElement>(null);
+  const CSV_IMPORT_BATCH_SIZE = 500;
+
   // ─── Data fetchers ──────────────────────────────────────────────────────────
 
   const fetchTables = useCallback(async () => {
@@ -437,6 +468,17 @@ export default function DatabasePage({
     if (tab === "tables") fetchTables();
     if (tab === "sql") fetchHistory();
   }, [tab, fetchRls, fetchTables, fetchHistory]);
+
+  useEffect(() => {
+    if (!importDropdownOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (importDropdownRef.current && !importDropdownRef.current.contains(e.target as Node)) {
+        setImportDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [importDropdownOpen]);
 
   function handleSelectTable(name: string) {
     setSelectedTable(name);
@@ -1025,6 +1067,155 @@ export default function DatabasePage({
     fetchTables();
   }
 
+  // ─── Import CSV handlers ──────────────────────────────────────────────────────
+
+  function parseCsvText(text: string): { headers: string[]; rows: string[][] } {
+    const lines = text.split(/\r?\n/);
+    if (lines.length === 0) return { headers: [], rows: [] };
+
+    function parseLine(line: string): string[] {
+      const fields: string[] = [];
+      let i = 0;
+      while (i < line.length) {
+        if (line[i] === '"') {
+          i++;
+          let field = "";
+          while (i < line.length) {
+            if (line[i] === '"' && line[i + 1] === '"') { field += '"'; i += 2; }
+            else if (line[i] === '"') { i++; break; }
+            else { field += line[i]; i++; }
+          }
+          fields.push(field);
+          if (line[i] === ",") i++;
+        } else {
+          const end = line.indexOf(",", i);
+          if (end === -1) { fields.push(line.slice(i)); break; }
+          fields.push(line.slice(i, end));
+          i = end + 1;
+        }
+      }
+      return fields;
+    }
+
+    const headers = parseLine(lines[0]);
+    const rows = lines.slice(1).filter((l) => l.trim()).map(parseLine);
+    return { headers, rows };
+  }
+
+  function handleImportCsvFile(file: File) {
+    if (!file.name.endsWith(".csv") && file.type !== "text/csv" && file.type !== "text/plain") {
+      toast.error("Please select a .csv file");
+      return;
+    }
+    importCsvFileRef.current = file;
+    setImportCsvFileName(file.name);
+    setImportCsvFileSize(file.size);
+    setImportCsvBatches([]);
+    setImportCsvDone(false);
+    setImportCsvHeaders([]);
+    setImportCsvColumnMap({});
+    setImportCsvPreviewRows([]);
+    setImportCsvParsedRows([]);
+    setImportCsvReading(true);
+    setImportCsvReadProgress(0);
+
+    const reader = new FileReader();
+    reader.onprogress = (e) => {
+      if (e.lengthComputable) setImportCsvReadProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    reader.onload = (e) => {
+      const text = (e.target?.result as string) ?? "";
+      const { headers, rows } = parseCsvText(text);
+      setImportCsvHeaders(headers);
+      setImportCsvPreviewRows(rows.slice(0, 5));
+      setImportCsvParsedRows(rows.map((r) => {
+        const obj: Record<string, string> = {};
+        headers.forEach((h, i) => { obj[h] = r[i] ?? ""; });
+        return obj;
+      }));
+      // Default column map: CSV header → same name (user can remap)
+      const map: Record<string, string> = {};
+      headers.forEach((h) => { map[h] = h; });
+      setImportCsvColumnMap(map);
+      setImportCsvReading(false);
+      setImportCsvReadProgress(100);
+    };
+    reader.onerror = () => { setImportCsvReading(false); setImportCsvReadProgress(0); };
+    reader.readAsText(file);
+  }
+
+  async function runImportCsv(startFromIndex = 0) {
+    if (!importCsvTargetTable || importCsvParsedRows.length === 0) return;
+
+    const mappedColumns = Object.entries(importCsvColumnMap)
+      .filter(([, dbCol]) => dbCol.trim() !== "")
+      .map(([csvCol, dbCol]) => ({ csvCol, dbCol }));
+    if (mappedColumns.length === 0) {
+      toast.error("Map at least one column before importing");
+      return;
+    }
+
+    const dbColumns = mappedColumns.map((m) => m.dbCol);
+    const mappedRows = importCsvParsedRows.map((row) => {
+      const mapped: Record<string, string> = {};
+      mappedColumns.forEach(({ csvCol, dbCol }) => { mapped[dbCol] = row[csvCol] ?? ""; });
+      return mapped;
+    });
+
+    // Build batches if starting fresh
+    let batches = importCsvBatches;
+    if (startFromIndex === 0 || batches.length === 0) {
+      const built: CsvImportBatch[] = [];
+      for (let i = 0; i < mappedRows.length; i += CSV_IMPORT_BATCH_SIZE) {
+        const slice = mappedRows.slice(i, i + CSV_IMPORT_BATCH_SIZE);
+        const end = Math.min(i + CSV_IMPORT_BATCH_SIZE, mappedRows.length);
+        built.push({ id: built.length, label: `Rows ${i + 1}–${end}`, rows: slice, status: "pending" });
+      }
+      batches = built;
+      setImportCsvBatches(batches);
+    } else {
+      batches = batches.map((b) =>
+        b.id >= startFromIndex ? { ...b, status: "pending" as const, error: undefined } : b
+      );
+      setImportCsvBatches(batches);
+    }
+
+    setImportCsvRunning(true);
+    setImportCsvDone(false);
+    importCsvAbortRef.current = false;
+
+    for (let idx = startFromIndex; idx < batches.length; idx++) {
+      if (importCsvAbortRef.current) break;
+
+      setImportCsvBatches((prev) => prev.map((b) => b.id === idx ? { ...b, status: "running" } : b));
+
+      try {
+        const res = await fetch(`/api/dashboard/${projectId}/csv-import`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tableName: importCsvTargetTable, columns: dbColumns, rows: batches[idx].rows }),
+        });
+        const data = await res.json() as { inserted?: number; error?: string };
+        if (data.error) {
+          setImportCsvBatches((prev) => prev.map((b) => b.id === idx ? { ...b, status: "error", error: data.error } : b));
+          setImportCsvRunning(false);
+          return;
+        }
+        setImportCsvBatches((prev) => prev.map((b) => b.id === idx ? { ...b, status: "done" } : b));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        setImportCsvBatches((prev) => prev.map((b) => b.id === idx ? { ...b, status: "error", error: msg } : b));
+        setImportCsvRunning(false);
+        return;
+      }
+    }
+
+    setImportCsvRunning(false);
+    setImportCsvDone(true);
+    fetchTables();
+    if (importCsvTargetTable === selectedTable) fetchTableRows(importCsvTargetTable);
+  }
+
   // ─── Derived ─────────────────────────────────────────────────────────────────
 
   const selectedTableMeta = tables.find((t) => t.table_name === selectedTable);
@@ -1051,13 +1242,34 @@ export default function DatabasePage({
       <div className="flex items-center justify-between px-6 h-14 border-b border-zinc-800 shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-semibold text-white">Database</h1>
-          <button
-            onClick={() => { setImportSqlContent(""); setImportSqlFileName(null); setImportSqlFileSize(0); importSqlFileRef.current = null; setImportSqlReading(false); setImportSqlReadProgress(0); setImportChunks([]); setImportDone(false); importSqlPanel.open(); }}
-            className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
-          >
-            <Upload size={12} />
-            Import SQL
-          </button>
+          <div className="relative" ref={importDropdownRef}>
+            <button
+              onClick={() => setImportDropdownOpen((v) => !v)}
+              className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
+            >
+              <Upload size={12} />
+              Import
+              <ChevronDown size={11} className={`transition-transform ${importDropdownOpen ? "rotate-180" : ""}`} />
+            </button>
+            {importDropdownOpen && (
+              <div className="absolute left-0 top-full mt-1 w-36 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-30 py-1 overflow-hidden">
+                <button
+                  onClick={() => { setImportDropdownOpen(false); setImportSqlContent(""); setImportSqlFileName(null); setImportSqlFileSize(0); importSqlFileRef.current = null; setImportSqlReading(false); setImportSqlReadProgress(0); setImportChunks([]); setImportDone(false); importSqlPanel.open(); }}
+                  className="cursor-pointer w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                >
+                  <FileText size={12} />
+                  Import SQL
+                </button>
+                <button
+                  onClick={() => { setImportDropdownOpen(false); setImportCsvFileName(null); setImportCsvFileSize(0); importCsvFileRef.current = null; setImportCsvReading(false); setImportCsvReadProgress(0); setImportCsvBatches([]); setImportCsvDone(false); setImportCsvHeaders([]); setImportCsvColumnMap({}); setImportCsvPreviewRows([]); setImportCsvParsedRows([]); setImportCsvTargetTable(selectedTable ?? ""); importCsvPanel.open(); }}
+                  className="cursor-pointer w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                >
+                  <Rows2 size={12} />
+                  Import CSV
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1">
           {(
@@ -3216,6 +3428,283 @@ with check (
                 >
                   {importRunning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} className="fill-current" />}
                   {importRunning ? "Importing…" : importChunks.length > 0 ? "Restart Import" : "Start Import"}
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Import CSV Slideover ── */}
+      {showImportCsv && (
+        <>
+          <div
+            className={`slide-panel-backdrop fixed inset-0 z-40 bg-black/40 ${importCsvPanel.closing ? "closing" : ""}`}
+            onClick={() => importCsvPanel.close()}
+          />
+          <div className={`slide-panel fixed inset-y-0 right-0 z-50 w-[620px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl ${importCsvPanel.closing ? "closing" : ""}`}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
+              <div>
+                <p className="text-sm font-semibold text-white">Import CSV</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Upload a .csv file and map columns to a table — imported in batches with resume on error</p>
+              </div>
+              <button
+                onClick={() => importCsvPanel.close()}
+                className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto flex flex-col gap-4 p-6">
+
+              {/* Drop zone — hide once batches are built */}
+              {importCsvBatches.length === 0 && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setImportCsvDragging(true); }}
+                  onDragLeave={() => setImportCsvDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setImportCsvDragging(false);
+                    const file = e.dataTransfer.files[0];
+                    if (file) handleImportCsvFile(file);
+                  }}
+                  onClick={() => importCsvInputRef.current?.click()}
+                  className={`cursor-pointer flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl py-10 transition-colors ${
+                    importCsvDragging
+                      ? "border-brand-500 bg-brand-500/5"
+                      : "border-zinc-700 hover:border-zinc-500 bg-zinc-900/40"
+                  }`}
+                >
+                  <Rows2 size={24} className="text-zinc-500" />
+                  <div className="text-center">
+                    <p className="text-sm text-zinc-300">
+                      {importCsvFileName ?? "Drop a .csv file here or click to browse"}
+                    </p>
+                    {!importCsvFileName && (
+                      <p className="text-xs text-zinc-600 mt-1">Supports .csv files with a header row</p>
+                    )}
+                    {importCsvFileName && importCsvFileSize > 0 && (
+                      <p className="text-xs text-zinc-500 mt-1">
+                        {importCsvFileSize >= 1024 * 1024
+                          ? `${(importCsvFileSize / (1024 * 1024)).toFixed(1)} MB`
+                          : `${(importCsvFileSize / 1024).toFixed(1)} KB`}
+                      </p>
+                    )}
+                  </div>
+                  {importCsvFileName && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setImportCsvFileName(null); setImportCsvFileSize(0); importCsvFileRef.current = null; setImportCsvReading(false); setImportCsvReadProgress(0); setImportCsvBatches([]); setImportCsvDone(false); setImportCsvHeaders([]); setImportCsvColumnMap({}); setImportCsvPreviewRows([]); setImportCsvParsedRows([]); }}
+                      className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 underline"
+                    >
+                      Remove file
+                    </button>
+                  )}
+                  <input
+                    ref={importCsvInputRef}
+                    type="file"
+                    accept=".csv,text/csv,text/plain"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportCsvFile(f); e.target.value = ""; }}
+                  />
+                </div>
+              )}
+
+              {/* File reading progress */}
+              {importCsvReading && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Reading file…</span>
+                    <span>{importCsvReadProgress}%</span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-brand-500 transition-all duration-150"
+                      style={{ width: `${importCsvReadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Table selector + column mapping — shown after file parsed, before import starts */}
+              {importCsvHeaders.length > 0 && importCsvBatches.length === 0 && (
+                <>
+                  {/* Target table */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs text-zinc-400 font-medium">Target Table</label>
+                    <select
+                      value={importCsvTargetTable}
+                      onChange={(e) => setImportCsvTargetTable(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500"
+                    >
+                      <option value="">— select a table —</option>
+                      {tables.map((t) => (
+                        <option key={t.table_name} value={t.table_name}>{t.table_name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Column mapping */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-zinc-400 font-medium">Column Mapping</label>
+                      <span className="text-xs text-zinc-600">{importCsvParsedRows.length.toLocaleString()} rows detected</span>
+                    </div>
+                    <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-1">
+                      {importCsvHeaders.map((csvCol) => (
+                        <div key={csvCol} className="flex items-center gap-3">
+                          <span className="w-40 shrink-0 truncate text-xs text-zinc-400 font-mono bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5">{csvCol}</span>
+                          <span className="text-xs text-zinc-600">→</span>
+                          <input
+                            type="text"
+                            value={importCsvColumnMap[csvCol] ?? ""}
+                            onChange={(e) => setImportCsvColumnMap((prev) => ({ ...prev, [csvCol]: e.target.value }))}
+                            placeholder="db column name (blank = skip)"
+                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 font-mono focus:outline-none focus:border-brand-500 placeholder-zinc-600"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  {importCsvPreviewRows.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs text-zinc-400 font-medium">Preview (first {importCsvPreviewRows.length} rows)</label>
+                      <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                        <table className="text-xs text-zinc-300 w-full">
+                          <thead>
+                            <tr className="border-b border-zinc-800 bg-zinc-900/60">
+                              {importCsvHeaders.map((h) => (
+                                <th key={h} className="px-3 py-2 text-left font-medium text-zinc-400 whitespace-nowrap">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {importCsvPreviewRows.map((row, ri) => (
+                              <tr key={ri} className="border-b border-zinc-800/50 last:border-0">
+                                {importCsvHeaders.map((h, ci) => (
+                                  <td key={ci} className="px-3 py-1.5 text-zinc-400 whitespace-nowrap max-w-[160px] truncate">{row[ci] ?? ""}</td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Overall progress bar — shown once batches exist */}
+              {importCsvBatches.length > 0 && (() => {
+                const done = importCsvBatches.filter(b => b.status === "done").length;
+                const errored = importCsvBatches.filter(b => b.status === "error").length;
+                const pct = Math.round((done / importCsvBatches.length) * 100);
+                return (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-xs text-zinc-400">
+                      <span className="font-medium text-zinc-300">
+                        <button
+                          onClick={() => { setImportCsvBatches([]); setImportCsvDone(false); }}
+                          className="cursor-pointer text-zinc-500 hover:text-zinc-300 underline mr-2"
+                        >
+                          ← Change file
+                        </button>
+                        {importCsvFileName}
+                      </span>
+                      <span>
+                        {errored > 0
+                          ? <span className="text-red-400">{done}/{importCsvBatches.length} — error in batch {importCsvBatches.findIndex(b => b.status === "error") + 1}</span>
+                          : importCsvDone
+                            ? <span className="text-green-400">Complete</span>
+                            : <span>{done}/{importCsvBatches.length} batches</span>
+                        }
+                      </span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${errored > 0 ? "bg-red-500" : importCsvDone ? "bg-green-500" : "bg-brand-500"}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Batch list */}
+              {importCsvBatches.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs font-medium text-zinc-400">{importCsvBatches.length} batches · {importCsvParsedRows.length.toLocaleString()} rows total</p>
+                  <div className="flex flex-col gap-1 max-h-72 overflow-y-auto pr-1">
+                    {importCsvBatches.map((batch) => (
+                      <div
+                        key={batch.id}
+                        className={`flex items-start gap-3 rounded-lg px-3 py-2.5 text-xs border transition-colors ${
+                          batch.status === "done"
+                            ? "bg-green-950/20 border-green-900/40 text-green-300"
+                            : batch.status === "error"
+                              ? "bg-red-950/30 border-red-800/50 text-red-300"
+                              : batch.status === "running"
+                                ? "bg-brand-950/30 border-brand-700/40 text-brand-300"
+                                : "bg-zinc-900/40 border-zinc-800 text-zinc-500"
+                        }`}
+                      >
+                        <span className="shrink-0 mt-0.5">
+                          {batch.status === "done" && <Check size={12} className="text-green-400" />}
+                          {batch.status === "error" && <AlertTriangle size={12} className="text-red-400" />}
+                          {batch.status === "running" && <Loader2 size={12} className="animate-spin text-brand-400" />}
+                          {batch.status === "pending" && <span className="inline-block w-3 h-3 rounded-full border border-zinc-600" />}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium">{batch.label}</span>
+                          {batch.status === "error" && batch.error && (
+                            <p className="mt-1 text-red-400 break-words">{batch.error}</p>
+                          )}
+                        </div>
+                        {batch.status === "error" && (
+                          <button
+                            onClick={() => runImportCsv(batch.id)}
+                            disabled={importCsvRunning}
+                            className="cursor-pointer shrink-0 text-xs text-red-400 hover:text-red-200 underline disabled:opacity-50"
+                          >
+                            Retry from here
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Success banner */}
+              {importCsvDone && (
+                <div className="flex items-center gap-3 rounded-lg px-4 py-3 text-sm border bg-green-950/40 border-green-800/50 text-green-300">
+                  <Check size={14} className="shrink-0" />
+                  <span>All rows imported successfully into <strong>{importCsvTargetTable}</strong>. Tables have been refreshed.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800 shrink-0">
+              <button
+                onClick={() => importCsvPanel.close()}
+                className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
+              >
+                {importCsvDone ? "Close" : "Cancel"}
+              </button>
+              {!importCsvDone && (
+                <button
+                  onClick={() => runImportCsv(0)}
+                  disabled={!importCsvTargetTable || importCsvParsedRows.length === 0 || importCsvRunning || importCsvReading}
+                  className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors"
+                >
+                  {importCsvRunning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} className="fill-current" />}
+                  {importCsvRunning ? "Importing…" : importCsvBatches.length > 0 ? "Restart Import" : "Start Import"}
                 </button>
               )}
             </div>
