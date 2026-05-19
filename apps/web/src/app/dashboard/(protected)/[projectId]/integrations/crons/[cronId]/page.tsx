@@ -12,6 +12,8 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Trash2,
+  Calendar,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -259,14 +261,26 @@ export default function CronDashboardPage({
   const [loading, setLoading] = useState(true);
   const [selectedRun, setSelectedRun] = useState<CronRun | null>(null);
 
+  // Date filter
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  // Selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+
   const prefix = `pb_${projectId.replace(/-/g, "")}_`;
 
   const fetchRuns = useCallback(
-    async (p: number) => {
+    async (p: number, from?: string, to?: string) => {
       setLoading(true);
+      setSelectedIds(new Set());
       try {
+        const qs = new URLSearchParams({ page: String(p), limit: String(LIMIT) });
+        if (from) qs.set("from", from);
+        if (to) qs.set("to", to);
         const res = await fetch(
-          `/api/dashboard/${projectId}/cron/${cronId}/runs?page=${p}&limit=${LIMIT}`
+          `/api/dashboard/${projectId}/cron/${cronId}/runs?${qs}`
         );
         if (!res.ok) { router.push(`/dashboard/${projectId}/integrations`); return; }
         const data = await res.json();
@@ -283,11 +297,77 @@ export default function CronDashboardPage({
 
   useEffect(() => { fetchRuns(1); }, [fetchRuns]);
 
+  const applyFilter = () => {
+    fetchRuns(1, fromDate || undefined, toDate || undefined);
+  };
+
+  const clearFilter = () => {
+    setFromDate("");
+    setToDate("");
+    fetchRuns(1);
+  };
+
+  const allOnPageSelected = runs.length > 0 && runs.every((r) => selectedIds.has(r.id));
+  const someSelected = selectedIds.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allOnPageSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(runs.map((r) => r.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    if (!confirm(`Delete ${selectedIds.size} run${selectedIds.size !== 1 ? "s" : ""}?`)) return;
+    setDeleting(true);
+    try {
+      await fetch(`/api/dashboard/${projectId}/cron/${cronId}/runs`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+      fetchRuns(page, fromDate || undefined, toDate || undefined);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const deleteAllFiltered = async () => {
+    const scope = fromDate || toDate ? "all runs matching the current date filter" : "ALL runs for this cron job";
+    if (!confirm(`This will delete ${scope}. Are you sure?`)) return;
+    setDeleting(true);
+    try {
+      await fetch(`/api/dashboard/${projectId}/cron/${cronId}/runs`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deleteAll: true,
+          from: fromDate || undefined,
+          to: toDate || undefined,
+        }),
+      });
+      fetchRuns(1, fromDate || undefined, toDate || undefined);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const displayName = job
     ? (job.name.startsWith(prefix) ? job.name.slice(prefix.length) : job.name)
     : "";
 
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+  const hasFilter = fromDate || toDate;
 
   return (
     <div className="flex flex-col h-full">
@@ -318,11 +398,69 @@ export default function CronDashboardPage({
           </span>
         )}
         <button
-          onClick={() => fetchRuns(page)}
+          onClick={() => fetchRuns(page, fromDate || undefined, toDate || undefined)}
           className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
         >
           <RefreshCw size={13} />
         </button>
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-800 shrink-0 flex-wrap">
+        <Calendar size={13} className="text-zinc-500 shrink-0" />
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-zinc-500">From</label>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-zinc-500">To</label>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500"
+          />
+        </div>
+        <button
+          onClick={applyFilter}
+          className="cursor-pointer px-3 py-1 rounded text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+        >
+          Apply
+        </button>
+        {hasFilter && (
+          <button
+            onClick={clearFilter}
+            className="cursor-pointer px-2 py-1 rounded text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            Clear
+          </button>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          {someSelected && (
+            <button
+              onClick={deleteSelected}
+              disabled={deleting}
+              className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs bg-red-900/40 text-red-400 hover:bg-red-900/60 transition-colors disabled:opacity-50"
+            >
+              <Trash2 size={11} />
+              Delete {selectedIds.size} selected
+            </button>
+          )}
+          <button
+            onClick={deleteAllFiltered}
+            disabled={deleting}
+            className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs text-zinc-500 hover:text-red-400 hover:bg-red-900/20 transition-colors disabled:opacity-50"
+          >
+            <Trash2 size={11} />
+            {hasFilter ? "Delete filtered" : "Delete all"}
+          </button>
+        </div>
       </div>
 
       {/* Body */}
@@ -334,17 +472,27 @@ export default function CronDashboardPage({
         ) : runs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Clock size={32} className="text-zinc-700 mb-3" />
-            <p className="text-zinc-500 text-sm">No runs yet.</p>
-            <p className="text-zinc-600 text-xs mt-1">
-              Runs will appear here once the job fires.
-            </p>
+            <p className="text-zinc-500 text-sm">No runs{hasFilter ? " matching filter" : " yet"}.</p>
+            {!hasFilter && (
+              <p className="text-zinc-600 text-xs mt-1">
+                Runs will appear here once the job fires.
+              </p>
+            )}
           </div>
         ) : (
           <>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
-                  <th className="text-left px-6 py-3 font-medium">Started</th>
+                  <th className="px-6 py-3 w-10">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={toggleSelectAll}
+                      className="cursor-pointer accent-brand-500"
+                    />
+                  </th>
+                  <th className="text-left px-3 py-3 font-medium">Started</th>
                   <th className="text-left px-4 py-3 font-medium">Duration</th>
                   <th className="text-left px-4 py-3 font-medium">Status</th>
                   <th className="text-left px-4 py-3 font-medium">Message</th>
@@ -354,19 +502,43 @@ export default function CronDashboardPage({
                 {runs.map((run) => (
                   <tr
                     key={run.id}
-                    onClick={() => setSelectedRun(run)}
-                    className="hover:bg-zinc-900/40 transition-colors cursor-pointer"
+                    className={`hover:bg-zinc-900/40 transition-colors ${
+                      selectedIds.has(run.id) ? "bg-zinc-900/60" : ""
+                    }`}
                   >
-                    <td className="px-6 py-3 text-zinc-300 font-mono text-xs">
+                    <td
+                      className="px-6 py-3"
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(run.id); }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(run.id)}
+                        onChange={() => toggleSelect(run.id)}
+                        className="cursor-pointer accent-brand-500"
+                      />
+                    </td>
+                    <td
+                      className="px-3 py-3 text-zinc-300 font-mono text-xs cursor-pointer"
+                      onClick={() => setSelectedRun(run)}
+                    >
                       {new Date(run.start_time).toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 text-zinc-500 font-mono text-xs">
+                    <td
+                      className="px-4 py-3 text-zinc-500 font-mono text-xs cursor-pointer"
+                      onClick={() => setSelectedRun(run)}
+                    >
                       {duration(run)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td
+                      className="px-4 py-3 cursor-pointer"
+                      onClick={() => setSelectedRun(run)}
+                    >
                       <StatusBadge status={run.status} />
                     </td>
-                    <td className="px-4 py-3 text-zinc-500 text-xs max-w-xs truncate">
+                    <td
+                      className="px-4 py-3 text-zinc-500 text-xs max-w-xs truncate cursor-pointer"
+                      onClick={() => setSelectedRun(run)}
+                    >
                       {run.return_message ?? <span className="text-zinc-700">—</span>}
                     </td>
                   </tr>
@@ -382,7 +554,7 @@ export default function CronDashboardPage({
                 </span>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => { setPage(page - 1); fetchRuns(page - 1); }}
+                    onClick={() => { setPage(page - 1); fetchRuns(page - 1, fromDate || undefined, toDate || undefined); }}
                     disabled={page <= 1}
                     className="cursor-pointer disabled:opacity-30 p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
                   >
@@ -392,7 +564,7 @@ export default function CronDashboardPage({
                     Page {page} of {totalPages}
                   </span>
                   <button
-                    onClick={() => { setPage(page + 1); fetchRuns(page + 1); }}
+                    onClick={() => { setPage(page + 1); fetchRuns(page + 1, fromDate || undefined, toDate || undefined); }}
                     disabled={page >= totalPages}
                     className="cursor-pointer disabled:opacity-30 p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
                   >
