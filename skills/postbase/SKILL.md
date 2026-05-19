@@ -309,6 +309,95 @@ await admin.auth.admin.deleteUser(userId)
 
 ### Storage
 
+#### Filename sanitization — REQUIRED before upload
+
+The Postbase server's upload route passes the object key directly to the S3 backend. Characters like `(`, `)`, spaces, and other non-URL-safe chars in filenames cause **500 errors** at the S3 `putObject` call. Always sanitize before calling `.upload()`:
+
+```js
+function safeName(file) {
+  const ext = file.name.includes('.') ? '.' + file.name.split('.').pop() : '';
+  const base = file.name.slice(0, file.name.length - ext.length);
+  const safeBase = base
+    .replace(/[^a-zA-Z0-9_-]/g, '-')  // strip unsafe chars
+    .replace(/-+/g, '-')               // collapse repeated dashes
+    .replace(/^-|-$/g, '');            // trim leading/trailing dashes
+  return safeBase + ext;
+}
+```
+
+Example: `207d8e34_(1).webp` → `207d8e34_-1-.webp` (parentheses removed, safe for S3).
+
+#### Upload options — use `upsert: false` for new files
+
+The postbasejs SDK sends **POST** when `upsert: false` and **PUT** when `upsert: true`. Use `upsert: false` for normal uploads; only use `upsert: true` when intentionally overwriting an existing object.
+
+```js
+// CORRECT — new file upload
+await postbase.storage.from('bucket').upload(safeName(file), file, {
+  cacheControl: '3600',
+  upsert: false,   // POST — correct for new files
+})
+
+// Only use upsert: true when you explicitly want to overwrite
+await postbase.storage.from('bucket').upload(safeName(file), file, {
+  upsert: true,    // PUT — overwrites existing object
+})
+```
+
+#### List response shape — NOT Supabase-compatible
+
+The Postbase list endpoint returns a **flat shape**, not the Supabase-style `{ id, name, metadata: { mimetype, size } }` shape. Always read from the correct fields:
+
+| What you need | Postbase field | ❌ Wrong (Supabase-style) |
+|---|---|---|
+| MIME type | `file.contentType` | `file.metadata?.mimetype` |
+| File size | `file.size` | `file.metadata?.size` |
+| Folder detection | no `id` field — use prefix or `.placeholder` convention | `file.id === null` |
+
+```js
+// CORRECT — Postbase list item shape
+// { name, size, contentType, createdAt, updatedAt }
+
+function isImageFile(file) {
+  if (file?.contentType?.startsWith('image/')) return true;
+  if (file?.metadata?.mimetype?.startsWith('image/')) return true; // fallback
+  return /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|avif)$/i.test(file?.name || '');
+}
+
+// size
+formatFileSize(file.size)           // ✓
+formatFileSize(file.metadata?.size) // ✗ always undefined
+```
+
+> **Why the extension fallback matters:** `contentType` is stored at upload time from the request `Content-Type` header. When using multipart/form-data the SDK sets the part's type from the File object — if the browser sniffs it wrong or the upload path doesn't preserve it, extension-based detection saves the preview.
+
+#### Mime type check caveat (server-side bug awareness)
+
+The Postbase storage route checks `allowedMimeTypes` against the request's `Content-Type` header. When using multipart/form-data (which the SDK always does), the header is `multipart/form-data; boundary=...` — not the file's actual mime type. If a bucket has `allowedMimeTypes` set and it doesn't include `multipart/form-data`, uploads will return **415**. Workaround: leave `allowedMimeTypes` empty on the bucket and enforce file type validation client-side.
+
+#### Server-side: list route response shape
+
+`POST /api/storage/v1/object/list/[bucket]` returns:
+
+```json
+{ "data": [{ "name": "photo.webp", "size": 4465, "contentType": "image/webp", "createdAt": "...", "updatedAt": "..." }] }
+```
+
+No `id`, no `metadata` wrapper. This differs from the Supabase Storage API — see the "List response shape" section above for correct field access.
+
+#### Server-side: how the upload route works
+
+For reference when debugging or extending the Postbase server (`/api/storage/v1/object/[bucket]/[...path]/route.ts`):
+
+1. Auth via `validateApiKey` on the `Authorization: Bearer` header
+2. Bucket looked up by name + projectId
+3. **Mime type check** uses `req.headers.get("content-type")` — this is `multipart/form-data; boundary=...` for SDK uploads, not the file's actual type
+4. File extracted from `form.get("file")` when multipart; raw body otherwise
+5. Size limit enforced against `bucket.fileSizeLimit`
+6. Object existence checked — 409 if exists and `upsert: false` (POST)
+7. `getStorageClient(projectId)` called — throws with 500 if `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, or `STORAGE_SECRET_KEY` env vars are missing and no per-project storage connection exists in DB
+8. `storage.putObject(bucket.name, objectPath, body, { contentType })` — object key is the raw URL path, so unsafe chars cause S3-level failures
+
 ```ts
 // Upload
 const { data } = await postbase.storage.from('avatars').upload('user-123.png', file, { contentType: 'image/png' })
