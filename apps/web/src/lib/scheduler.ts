@@ -18,7 +18,7 @@ type HttpJobConfig = {
 // Map of jobId → active node-cron task
 const tasks = new Map<string, ScheduledTask>();
 
-async function runHttpJob(cfg: HttpJobConfig): Promise<string> {
+async function runHttpJob(cfg: HttpJobConfig): Promise<{ statusLine: string; body: string }> {
   const init: RequestInit = {
     method: cfg.method,
     headers: cfg.headers,
@@ -27,7 +27,8 @@ async function runHttpJob(cfg: HttpJobConfig): Promise<string> {
     init.body = cfg.body;
   }
   const res = await fetch(cfg.url, init);
-  return `${res.status} ${res.statusText}`;
+  const body = await res.text();
+  return { statusLine: `${res.status} ${res.statusText}`, body };
 }
 
 async function runJob(
@@ -43,11 +44,14 @@ async function runJob(
 
   let status: "succeeded" | "failed" = "succeeded";
   let returnMessage: string | null = null;
+  let responseBody: string | null = null;
 
   try {
     if (command.startsWith(HTTP_PREFIX)) {
       const cfg = JSON.parse(command.slice(HTTP_PREFIX.length)) as HttpJobConfig;
-      returnMessage = await runHttpJob(cfg);
+      const result = await runHttpJob(cfg);
+      returnMessage = result.statusLine;
+      responseBody = result.body;
     } else {
       const pool = getProjectPool(databaseUrl);
       const client = await pool.connect();
@@ -66,7 +70,7 @@ async function runJob(
 
   await db
     .update(cronJobRuns)
-    .set({ status, returnMessage, endTime: new Date() })
+    .set({ status, returnMessage, responseBody, endTime: new Date() })
     .where(eq(cronJobRuns.id, run.id));
 
   // Prune runs older than the last 100 for this job

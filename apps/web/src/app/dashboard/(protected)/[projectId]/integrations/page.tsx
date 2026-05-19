@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, use } from "react";
+import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import {
   Clock,
@@ -21,6 +22,7 @@ import {
   ChevronDown,
   ChevronUp,
   Minus,
+  LayoutDashboard,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -523,6 +525,7 @@ export default function IntegrationsPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
+  const router = useRouter();
   const toast = useToast();
   const [tab, setTab] = useState<Tab>("cron");
 
@@ -899,19 +902,32 @@ export default function IntegrationsPage({
                               <code className="text-xs text-zinc-400 truncate block">{describeCommand(job.command)}</code>
                             </td>
                             <td className="px-4 py-3">
-                              {/* Toggle switch */}
-                              <button
-                                onClick={() => toggleJob(job)}
-                                className={`cursor-pointer relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                                  job.active ? "bg-brand-500" : "bg-zinc-700"
-                                }`}
-                              >
-                                <span
-                                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                                    job.active ? "translate-x-[18px]" : "translate-x-[3px]"
+                              <div className="flex items-center gap-2">
+                                {/* Toggle switch */}
+                                <button
+                                  onClick={() => toggleJob(job)}
+                                  className={`cursor-pointer relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                                    job.active ? "bg-brand-500" : "bg-zinc-700"
                                   }`}
-                                />
-                              </button>
+                                >
+                                  <span
+                                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                                      job.active ? "translate-x-[18px]" : "translate-x-[3px]"
+                                    }`}
+                                  />
+                                </button>
+                                {/* Dashboard icon */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    router.push(`/dashboard/${projectId}/integrations/crons/${job.jobid}`);
+                                  }}
+                                  title="View run history"
+                                  className="cursor-pointer p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100"
+                                >
+                                  <LayoutDashboard size={14} />
+                                </button>
+                              </div>
                             </td>
                             <td className="px-4 py-3 relative">
                               <button

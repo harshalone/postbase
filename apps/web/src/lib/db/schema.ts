@@ -269,6 +269,7 @@ export const cronJobRuns = postbaseSchema.table(
     endTime: timestamp("end_time"),
     status: text("status").notNull().default("running"), // 'running' | 'succeeded' | 'failed'
     returnMessage: text("return_message"),
+    responseBody: text("response_body"),
   },
   (t) => ({
     jobIdx: index("cron_job_runs_job_idx").on(t.jobId),
