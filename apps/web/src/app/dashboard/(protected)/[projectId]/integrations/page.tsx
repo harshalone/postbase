@@ -888,7 +888,17 @@ export default function IntegrationsPage({
                         const lastRun = job.runs[0];
                         return (
                           <tr key={job.jobid} className="hover:bg-zinc-900/40 transition-colors group">
-                            <td className="px-6 py-3 text-white font-medium">{displayName}</td>
+                            <td className="px-6 py-3">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/dashboard/${projectId}/integrations/crons/${job.jobid}`);
+                                }}
+                                className="cursor-pointer text-white font-medium hover:text-brand-400 transition-colors text-left"
+                              >
+                                {displayName}
+                              </button>
+                            </td>
                             <td className="px-4 py-3 text-zinc-400">{formatSchedule(job.schedule)}</td>
                             <td className="px-4 py-3 text-zinc-500">
                               {lastRun

@@ -28,7 +28,14 @@ async function runHttpJob(cfg: HttpJobConfig): Promise<{ statusLine: string; bod
   }
   const res = await fetch(cfg.url, init);
   const body = await res.text();
-  return { statusLine: `${res.status} ${res.statusText}`, body };
+  const statusLine = `${res.status} ${res.statusText}`;
+  if (!res.ok) {
+    const err = new Error(statusLine) as Error & { statusLine: string; body: string };
+    err.statusLine = statusLine;
+    err.body = body;
+    throw err;
+  }
+  return { statusLine, body };
 }
 
 async function runJob(
@@ -65,7 +72,13 @@ async function runJob(
     }
   } catch (err) {
     status = "failed";
-    returnMessage = err instanceof Error ? err.message : String(err);
+    if (err instanceof Error && "statusLine" in err) {
+      const httpErr = err as Error & { statusLine: string; body: string };
+      returnMessage = httpErr.statusLine;
+      responseBody = httpErr.body;
+    } else {
+      returnMessage = err instanceof Error ? err.message : String(err);
+    }
   }
 
   await db

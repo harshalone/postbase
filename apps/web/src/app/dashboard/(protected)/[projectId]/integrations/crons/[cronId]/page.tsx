@@ -242,6 +242,55 @@ function RunDetailPanel({
   );
 }
 
+// ─── Confirm Delete Modal ─────────────────────────────────────────────────────
+
+function ConfirmDeleteModal({
+  message,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-zinc-950 border border-zinc-800 rounded-xl w-full max-w-sm mx-4 shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+          <h2 className="text-base font-semibold text-white">Confirm deletion</h2>
+          <button
+            onClick={onCancel}
+            className="cursor-pointer p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="px-6 py-4">
+          <p className="text-sm text-zinc-400">{message}</p>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800">
+          <button
+            onClick={onCancel}
+            className="cursor-pointer px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors"
+          >
+            <Trash2 size={13} />
+            {loading ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const LIMIT = 50;
@@ -268,6 +317,12 @@ export default function CronDashboardPage({
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+
+  // Confirm delete modal
+  const [confirmModal, setConfirmModal] = useState<{
+    message: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
 
   const prefix = `pb_${projectId.replace(/-/g, "")}_`;
 
@@ -327,39 +382,52 @@ export default function CronDashboardPage({
     });
   };
 
-  const deleteSelected = async () => {
-    if (!confirm(`Delete ${selectedIds.size} run${selectedIds.size !== 1 ? "s" : ""}?`)) return;
-    setDeleting(true);
-    try {
-      await fetch(`/api/dashboard/${projectId}/cron/${cronId}/runs`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
-      });
-      fetchRuns(page, fromDate || undefined, toDate || undefined);
-    } finally {
-      setDeleting(false);
-    }
+  const deleteSelected = () => {
+    const count = selectedIds.size;
+    setConfirmModal({
+      message: `Delete ${count} run${count !== 1 ? "s" : ""}? This cannot be undone.`,
+      onConfirm: async () => {
+        setDeleting(true);
+        try {
+          await fetch(`/api/dashboard/${projectId}/cron/${cronId}/runs`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: Array.from(selectedIds) }),
+          });
+          fetchRuns(page, fromDate || undefined, toDate || undefined);
+        } finally {
+          setDeleting(false);
+          setConfirmModal(null);
+        }
+      },
+    });
   };
 
-  const deleteAllFiltered = async () => {
-    const scope = fromDate || toDate ? "all runs matching the current date filter" : "ALL runs for this cron job";
-    if (!confirm(`This will delete ${scope}. Are you sure?`)) return;
-    setDeleting(true);
-    try {
-      await fetch(`/api/dashboard/${projectId}/cron/${cronId}/runs`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          deleteAll: true,
-          from: fromDate || undefined,
-          to: toDate || undefined,
-        }),
-      });
-      fetchRuns(1, fromDate || undefined, toDate || undefined);
-    } finally {
-      setDeleting(false);
-    }
+  const deleteAllFiltered = () => {
+    const scope = fromDate || toDate
+      ? "all runs matching the current date filter"
+      : "all runs for this cron job";
+    setConfirmModal({
+      message: `This will permanently delete ${scope}. This cannot be undone.`,
+      onConfirm: async () => {
+        setDeleting(true);
+        try {
+          await fetch(`/api/dashboard/${projectId}/cron/${cronId}/runs`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              deleteAll: true,
+              from: fromDate || undefined,
+              to: toDate || undefined,
+            }),
+          });
+          fetchRuns(1, fromDate || undefined, toDate || undefined);
+        } finally {
+          setDeleting(false);
+          setConfirmModal(null);
+        }
+      },
+    });
   };
 
   const displayName = job
@@ -583,6 +651,16 @@ export default function CronDashboardPage({
           run={selectedRun}
           job={job}
           onClose={() => setSelectedRun(null)}
+        />
+      )}
+
+      {/* Confirm delete modal */}
+      {confirmModal && (
+        <ConfirmDeleteModal
+          message={confirmModal.message}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+          loading={deleting}
         />
       )}
     </div>
