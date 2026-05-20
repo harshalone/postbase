@@ -33,13 +33,19 @@ export async function GET(
     }>(
       `SELECT
          t.table_name,
-         COALESCE(s.n_live_tup, 0)::text AS row_estimate,
+         GREATEST(
+           COALESCE(s.n_live_tup, 0),
+           CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint ELSE 0 END
+         )::text AS row_estimate,
          COALESCE(pg_total_relation_size(
            quote_ident($1) || '.' || quote_ident(t.table_name)
          ), 0)::text AS size_bytes
        FROM information_schema.tables t
        LEFT JOIN pg_stat_user_tables s
          ON s.schemaname = $1 AND s.relname = t.table_name
+       LEFT JOIN pg_class c
+         ON c.relname = t.table_name
+         AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = $1)
        WHERE t.table_schema = $1 AND t.table_type = 'BASE TABLE'
        ORDER BY t.table_name`,
       [schema]
