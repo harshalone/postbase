@@ -23,18 +23,40 @@ export async function GET(
   const offset = Number(url.searchParams.get("offset") ?? 0);
   const sortCol = url.searchParams.get("sortCol");
   const sortDir = url.searchParams.get("sortDir") === "desc" ? "DESC" : "ASC";
+  const search = url.searchParams.get("search")?.trim() ?? "";
 
   const pool = getProjectPool(project.databaseUrl);
   const client = await pool.connect();
   try {
     const schema = await ensureProjectSchema(client, projectId);
+
+    // Build WHERE clause for search: cast every column to text and ILIKE-match
+    let whereClause = "";
+    const queryValues: unknown[] = [];
+    if (search) {
+      // Fetch column names for this table
+      const { rows: cols } = await client.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = $2
+         ORDER BY ordinal_position`,
+        [schema, tableName]
+      );
+      if (cols.length > 0) {
+        const conditions = cols.map((c) => `"${c.column_name}"::text ILIKE $1`).join(" OR ");
+        whereClause = ` WHERE (${conditions})`;
+        queryValues.push(`%${search}%`);
+      }
+    }
+
     const orderClause = sortCol ? ` ORDER BY "${sortCol.replace(/"/g, "")}" ${sortDir}` : "";
+    const dataValues = [...queryValues, limit, offset];
     const { rows } = await client.query(
-      `SELECT * FROM "${schema}"."${tableName}"${orderClause} LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      `SELECT * FROM "${schema}"."${tableName}"${whereClause}${orderClause} LIMIT $${queryValues.length + 1} OFFSET $${queryValues.length + 2}`,
+      dataValues
     );
     const { rows: [{ count }] } = await client.query(
-      `SELECT COUNT(*)::int AS count FROM "${schema}"."${tableName}"`
+      `SELECT COUNT(*)::int AS count FROM "${schema}"."${tableName}"${whereClause}`,
+      queryValues
     );
     return NextResponse.json({ rows, total: count });
   } catch (err) {
