@@ -213,6 +213,10 @@ export default function DatabasePage({
   } | null>(null);
   const cellContextMenuRef = useRef<HTMLDivElement>(null);
 
+  // Filter / search state
+  const [filterText, setFilterText] = useState("");
+  const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Sort state
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -416,14 +420,15 @@ export default function DatabasePage({
   }, [projectId]);
 
   const fetchTableRows = useCallback(
-    async (tableName: string, offset = 0, col?: string | null, dir?: "asc" | "desc") => {
+    async (tableName: string, offset = 0, col?: string | null, dir?: "asc" | "desc", search?: string) => {
       setTableLoading(true);
       try {
         const resolvedCol = col !== undefined ? col : sortCol;
         const resolvedDir = dir !== undefined ? dir : sortDir;
         const sortParam = resolvedCol ? `&sortCol=${encodeURIComponent(resolvedCol)}&sortDir=${resolvedDir}` : "";
+        const searchParam = search !== undefined && search !== "" ? `&search=${encodeURIComponent(search)}` : "";
         const res = await fetch(
-          `/api/dashboard/${projectId}/tables/${tableName}?limit=${TABLE_LIMIT}&offset=${offset}${sortParam}`
+          `/api/dashboard/${projectId}/tables/${tableName}?limit=${TABLE_LIMIT}&offset=${offset}${sortParam}${searchParam}`
         );
         const data = await res.json();
         setTableRows(data.rows ?? []);
@@ -485,13 +490,14 @@ export default function DatabasePage({
     setSelectedRows(new Set());
     setSortCol(null);
     setSortDir("asc");
+    setFilterText("");
     try {
       const stored = localStorage.getItem(`frozen:${projectId}:${name}`);
       setFrozenOrder(stored ? (JSON.parse(stored) as string[]) : []);
     } catch {
       setFrozenOrder([]);
     }
-    fetchTableRows(name, 0, null, "asc");
+    fetchTableRows(name, 0, null, "asc", "");
   }
 
   function handleSort(colName: string) {
@@ -499,7 +505,7 @@ export default function DatabasePage({
     const newDir = sortCol === colName && sortDir === "asc" ? "desc" : "asc";
     setSortCol(colName);
     setSortDir(newDir);
-    fetchTableRows(selectedTable, 0, colName, newDir);
+    fetchTableRows(selectedTable, 0, colName, newDir, filterText);
     setColMenu(null);
   }
 
@@ -507,7 +513,7 @@ export default function DatabasePage({
     if (!selectedTable) return;
     setSortCol(colName);
     setSortDir("asc");
-    fetchTableRows(selectedTable, 0, colName, "asc");
+    fetchTableRows(selectedTable, 0, colName, "asc", filterText);
     setColMenu(null);
   }
 
@@ -515,7 +521,7 @@ export default function DatabasePage({
     if (!selectedTable) return;
     setSortCol(colName);
     setSortDir("desc");
-    fetchTableRows(selectedTable, 0, colName, "desc");
+    fetchTableRows(selectedTable, 0, colName, "desc", filterText);
     setColMenu(null);
   }
 
@@ -1394,12 +1400,45 @@ export default function DatabasePage({
                 <>
                   {/* Toolbar */}
                   <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0 flex-wrap">
-                    <div className="flex items-center gap-2 flex-1 min-w-48 bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs text-zinc-500 cursor-text">
+                    <div className="flex items-center gap-2 flex-1 min-w-48 bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs focus-within:border-zinc-600 transition-colors">
                       <Search size={12} className="shrink-0 text-zinc-600" />
-                      <span className="truncate">
-                        Filter by {selectedTableMeta?.columns.slice(0, 3).map((c) => c.column_name).join(", ")}
-                        {(selectedTableMeta?.columns.length ?? 0) > 3 ? "…" : ""} or ask AI
-                      </span>
+                      <input
+                        type="text"
+                        value={filterText}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setFilterText(val);
+                          if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+                          filterDebounceRef.current = setTimeout(() => {
+                            if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, val);
+                          }, 300);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+                            if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, filterText);
+                          }
+                          if (e.key === "Escape") {
+                            setFilterText("");
+                            if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+                            if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, "");
+                          }
+                        }}
+                        placeholder={`Filter by ${selectedTableMeta?.columns.slice(0, 3).map((c) => c.column_name).join(", ")}${(selectedTableMeta?.columns.length ?? 0) > 3 ? "…" : ""}`}
+                        className="flex-1 bg-transparent outline-none text-zinc-200 placeholder-zinc-600 min-w-0"
+                      />
+                      {filterText && (
+                        <button
+                          onClick={() => {
+                            setFilterText("");
+                            if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+                            if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, "");
+                          }}
+                          className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors"
+                        >
+                          <X size={11} />
+                        </button>
+                      )}
                     </div>
 
                     {/* Bulk Actions */}
@@ -1792,7 +1831,7 @@ export default function DatabasePage({
                     <div className="flex items-center gap-2 text-xs text-zinc-500">
                       <button
                         disabled={tableOffset === 0}
-                        onClick={() => fetchTableRows(selectedTable, tableOffset - TABLE_LIMIT)}
+                        onClick={() => fetchTableRows(selectedTable, tableOffset - TABLE_LIMIT, undefined, undefined, filterText)}
                         className="cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed p-1 rounded hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
                       >
                         <ChevronLeft size={13} />
@@ -1803,7 +1842,7 @@ export default function DatabasePage({
                       </span>
                       <button
                         disabled={tableOffset + TABLE_LIMIT >= tableTotal}
-                        onClick={() => fetchTableRows(selectedTable, tableOffset + TABLE_LIMIT)}
+                        onClick={() => fetchTableRows(selectedTable, tableOffset + TABLE_LIMIT, undefined, undefined, filterText)}
                         className="cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed p-1 rounded hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
                       >
                         <ChevronRight size={13} />
