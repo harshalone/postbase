@@ -100,11 +100,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ fn:
 
   // Build named argument list: schema.fn(key => $1, key2 => $2)
   const schema = getProjectSchema(keyInfo.projectId);
-  const argList = argKeys.map((k, i) => {
-    const v = values[i];
-    const isVectorLiteral = typeof v === "string" && /^\s*\[[-\d.,\s]+\]\s*$/.test(v);
-    return `${k} => $${i + 1}${isVectorLiteral ? "::vector" : ""}`;
-  }).join(", ");
+  const argList = argKeys.map((k, i) => `${k} => $${i + 1}`).join(", ");
   const sql = `SELECT * FROM ${schema}.${fnSafe}(${argList})`;
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
