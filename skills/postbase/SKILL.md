@@ -768,6 +768,83 @@ pnpm db:push
 
 ---
 
+## PostgreSQL Functions (RPC) in Postbase
+
+### CRITICAL: Always create functions in the project schema
+
+The Postbase RPC handler executes `SELECT * FROM <project_schema>.<fn>(...)`. Functions created without an explicit schema land in `public` and will return:
+
+```
+function proj_<id>.my_fn() does not exist
+```
+
+**Always prefix `CREATE OR REPLACE FUNCTION` with the project schema name:**
+
+```sql
+-- WRONG — lands in public, RPC will 404
+CREATE OR REPLACE FUNCTION match_chunks(...) ...
+
+-- CORRECT — explicitly in the project schema
+CREATE OR REPLACE FUNCTION proj_a479764f7ba04fa6aa507303b73c5fa0.match_chunks(...) ...
+```
+
+The project schema name is derived by removing dashes from the project UUID:
+- Project ID: `a479764f-7ba0-4fa6-aa50-7303b73c5fa0`
+- Schema: `proj_a479764f7ba04fa6aa507303b73c5fa0`
+
+### pgvector in Postbase
+
+When pgvector is installed, the `vector` type lives in the **project schema**, not `public`:
+
+```sql
+SELECT extname, extnamespace::regnamespace FROM pg_extension WHERE extname = 'vector';
+-- extnamespace: proj_a479764f7ba04fa6aa507303b73c5fa0
+```
+
+This means:
+- `::vector` casts fail — the type isn't on the default `search_path`
+- `p_embedding vector(1536)` as a parameter type fails with `type "vector" does not exist`
+
+**Fix: accept embedding as `TEXT` and cast inside the function body using the fully-qualified type:**
+
+```sql
+CREATE OR REPLACE FUNCTION proj_a479764f7ba04fa6aa507303b73c5fa0.match_chunks(
+  p_chatbot_id UUID,
+  p_embedding  TEXT,          -- TEXT avoids type resolution issue at call site
+  p_limit      INTEGER DEFAULT 5
+)
+RETURNS TABLE (
+  chunk_text TEXT,
+  similarity FLOAT,
+  url        VARCHAR(2048)
+)
+LANGUAGE plpgsql VOLATILE
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    cc.chunk_text,
+    1 - (cc.embedding <=> p_embedding::proj_a479764f7ba04fa6aa507303b73c5fa0.vector(1536)) AS similarity,
+    cc.url
+  FROM proj_a479764f7ba04fa6aa507303b73c5fa0.lonare_crawled_content cc
+  WHERE cc.chatbot_id = p_chatbot_id
+    AND cc.embedding IS NOT NULL
+    AND cc.chunk_text IS NOT NULL
+  ORDER BY cc.embedding <=> p_embedding::proj_a479764f7ba04fa6aa507303b73c5fa0.vector(1536)
+  LIMIT p_limit;
+END;
+$$;
+```
+
+**Key rules:**
+1. Function schema = project schema (not `public`)
+2. Parameter type = `TEXT` (not `vector`) — the Postbase RPC handler passes it as a plain string
+3. Cast to `proj_<id>.vector` inside the body where the schema is known
+4. Table references also use the full `proj_<id>.table_name` prefix
+5. Always use `LANGUAGE plpgsql VOLATILE` — the Postbase RPC handler calls `SET` config vars (for RLS) before invoking the function; `STABLE` and `IMMUTABLE` reject `SET` with "SET is not allowed in a non-volatile function"
+
+---
+
 ## Swift / iOS Integration Notes
 
 When calling the Postbase REST API directly from Swift (no SDK):
