@@ -94,8 +94,18 @@ Headers: X-Postbase-Token: <access_token>
 ```
 GET /api/auth/v1/{projectId}/user
 Headers: X-Postbase-Token: <access_token>   (required)
-200: { id, email, name, image, data }
+200: { user: { id, email, name, image, emailVerified, phone, metadata, createdAt, updatedAt } }
 ```
+
+> **CRITICAL — response shape:** The user is nested under a `user` key, NOT at the root.
+> Always parse as `const u = json.user` (not `json`). Reading `json.id` returns `undefined`
+> and silently breaks any feature that stores or compares the user ID.
+>
+> ```ts
+> const json = await res.json();
+> const u = json.user ?? json; // safe fallback
+> if (!u?.id) return null;     // guard against missing user
+> ```
 
 #### Update Authenticated User
 ```
@@ -124,6 +134,9 @@ Body:
   "filters": [
     { "column": "id", "operator": "eq", "value": "abc" }
   ],
+  "joins": [                          // select only — optional
+    { "table": "users", "on": "orders.user_id = users.id", "type": "left" }
+  ],
   "data": { "col": "val" },           // insert / update / upsert payload
   "limit": 10,
   "offset": 0
@@ -132,9 +145,35 @@ Body:
 
 **Filter operators:** `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `in`, `is`, `contains`, `overlaps`
 
-**Important:** Do NOT pass `"columns": ["*"]` — Postbase rejects the wildcard. Omit `columns` entirely to return all columns.
+**Join types:** `inner` (default), `left`, `right`, `full`
+
+**Join `on` expression rules:** identifiers and dotted `table.column` references only, with operators `=`, `<`, `>`, `!=`, `<=`, `>=`. No string literals, no functions, no subqueries — the server validates via a strict allow-list regex and rejects anything else.
+
+**Important:** Do NOT pass `"columns": ["*"]` — Postbase rejects the wildcard. Omit `columns` entirely to return all columns. When using joins, use `"table.column"` notation in `columns` to disambiguate.
 
 **Response:** `{ "data": [...], "count": N }` or a direct array `[...]`
+
+---
+
+### Raw SQL — `/api/db/sql`
+
+Execute a raw parameterized SQL query. RLS context is still enforced — the user JWT is applied before the query runs.
+
+```
+POST /api/db/sql
+Authorization: Bearer <api_key>
+X-Postbase-Token: <user_jwt>   (optional — enables RLS)
+
+Body:
+{
+  "query": "SELECT o.id, u.email FROM orders o JOIN users u ON o.user_id = u.id WHERE o.status = $1",
+  "params": ["active"]
+}
+```
+
+Params replace `$1`, `$2`, … positional placeholders. Never interpolate values into the query string.
+
+**Response:** `{ "data": [...], "count": N }`
 
 ---
 
@@ -254,12 +293,66 @@ const { data } = await postbase.from('profiles').upsert({ id: 'user-id', usernam
 const { error } = await postbase.from('posts').delete().eq('id', id)
 ```
 
+### Joins
+
+Requires **postbasejs ≥ 0.5.0** and **postbase server ≥ 0.2.0**.
+
+```ts
+// Left join — single
+const { data } = await postbase
+  .from('orders')
+  .join('users', { on: 'orders.user_id = users.id', type: 'left' })
+  .select('orders.id, orders.total, users.email')
+
+// Multiple joins with filters
+const { data } = await postbase
+  .from('orders')
+  .join('users',    { on: 'orders.user_id = users.id',       type: 'left' })
+  .join('products', { on: 'orders.product_id = products.id' })          // type defaults to 'inner'
+  .select('orders.id, users.email, products.name')
+  .eq('orders.status', 'active')
+  .order('orders.created_at', { ascending: false })
+  .limit(20)
+```
+
+**Join types:** `'inner'` (default) | `'left'` | `'right'` | `'full'`
+
+**`on` expression rules** — server validates against a strict allow-list:
+- `table.column OPERATOR table.column` — identifiers and dotted refs only
+- Operators allowed: `=` `<` `>` `!=` `<=` `>=`
+- No string literals, no functions, no subqueries, no `AND`/`OR`
+
+### Raw SQL
+
+For queries that can't be expressed with the builder (CTEs, window functions, complex aggregates). RLS still applies.
+
+```ts
+const { data, error } = await postbase.sql<{ id: string; email: string }>(
+  `SELECT o.id, u.email
+   FROM orders o
+   INNER JOIN users u ON o.user_id = u.id
+   WHERE o.status = $1`,
+  ['active']
+)
+```
+
+Never interpolate values directly into the query string — always use `$1`, `$2`, … params.
+
 ### TypeScript generics
 
 ```ts
 interface Post { id: string; title: string; status: 'draft' | 'published'; created_at: string }
 const { data } = await postbase.from<Post>('posts').select().eq('status', 'published')
 // data is Post[] | null
+
+// Joins — define a type spanning all selected columns
+interface OrderRow { id: string; email: string; name: string }
+const { data } = await postbase
+  .from<OrderRow>('orders')
+  .join('users',    { on: 'orders.user_id = users.id', type: 'left' })
+  .join('products', { on: 'orders.product_id = products.id' })
+  .select('orders.id, users.email, products.name')
+// data is OrderRow[] | null
 ```
 
 ### Auth
