@@ -77,6 +77,12 @@ const filterSchema = z.object({
 const orFilterSchema = z.string(); // raw filter string like "name.eq.foo,age.gt.18"
 const notFilterSchema = z.object({ column: z.string(), operator: z.string(), value: z.unknown() });
 
+const joinSchema = z.object({
+  table: z.string().min(1),
+  on: z.string().min(1),
+  type: z.enum(["inner", "left", "right", "full"]).optional(),
+});
+
 const baseQueryFields = {
   table: z.string().min(1),
   orFilters: z.array(orFilterSchema).optional(),
@@ -93,6 +99,7 @@ const querySchema = z.discriminatedUnion("operation", [
     ...baseQueryFields,
     columns: z.array(z.string()).optional(),
     filters: z.array(filterSchema).optional(),
+    joins: z.array(joinSchema).optional(),
     count: z.enum(["exact", "planned", "estimated"]).optional(),
     head: z.boolean().optional(),
   }),
@@ -132,6 +139,26 @@ function sanitizeIdentifier(name: string): string {
     throw new Error(`Invalid identifier: ${name}`);
   }
   return name;
+}
+
+// Validates a join ON expression like "orders.user_id = users.id"
+// Only allows: identifiers, dots, spaces, =, and the operators <, >, !=, <=, >=
+function sanitizeJoinOn(on: string): string {
+  if (!/^[a-zA-Z0-9_. =<>!]+$/.test(on)) {
+    throw new Error(`Invalid JOIN ON expression: ${on}`);
+  }
+  return on;
+}
+
+type JoinClause = { table: string; on: string; type?: "inner" | "left" | "right" | "full" };
+
+function buildJoinClauses(joins: JoinClause[]): string {
+  return joins.map(({ table, on, type }) => {
+    const joinType = (type ?? "inner").toUpperCase();
+    const safeTable = sanitizeIdentifier(table);
+    const safeOn = sanitizeJoinOn(on);
+    return `${joinType} JOIN "${safeTable}" ON ${safeOn}`;
+  }).join(" ");
 }
 
 function buildFilterClause(filter: Filter, values: unknown[]): string {
@@ -268,29 +295,39 @@ export async function POST(req: NextRequest) {
 
     switch (input.operation) {
       case "select": {
+        const joins = input.joins ?? [];
+        const joinSql = joins.length ? " " + buildJoinClauses(joins) : "";
+
+        // Quote a column, handling optional table prefix (e.g. "orders.id" → "orders"."id")
+        function quoteCol(c: string): string {
+          const parts = c.split(".");
+          if (parts.length === 2) {
+            return `"${sanitizeIdentifier(parts[0])}"."${sanitizeIdentifier(parts[1])}"`;
+          }
+          return `"${sanitizeIdentifier(c)}"`;
+        }
+
         if (input.head) {
-          // COUNT only
           const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
-          sql = `SELECT COUNT(*) FROM "${table}" ${whereClause}`;
+          sql = `SELECT COUNT(*) FROM "${table}"${joinSql} ${whereClause}`;
           const result = await client.query(sql, values);
           return Response.json({ data: null, count: parseInt(result.rows[0].count, 10) });
         }
 
         const cols = input.columns
           ?.flatMap((c) => c.split(",").map((s) => s.trim()).filter(Boolean))
-          .map((c) => `"${sanitizeIdentifier(c)}"`)
+          .map(quoteCol)
           .join(", ") ?? "*";
         const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
 
         if (input.count === "exact") {
-          // Run COUNT alongside
-          const countSql = `SELECT COUNT(*) FROM "${table}" ${whereClause}`;
+          const countSql = `SELECT COUNT(*) FROM "${table}"${joinSql} ${whereClause}`;
           const countResult = await client.query(countSql, values);
           const total = parseInt(countResult.rows[0].count, 10);
 
-          sql = `SELECT ${cols} FROM "${table}" ${whereClause}`;
+          sql = `SELECT ${cols} FROM "${table}"${joinSql} ${whereClause}`;
           if (orderBy.length) {
-            sql += " ORDER BY " + orderBy.map(o => `"${sanitizeIdentifier(o.column)}" ${o.ascending === false ? "DESC" : "ASC"}${o.nullsFirst ? " NULLS FIRST" : ""}`).join(", ");
+            sql += " ORDER BY " + orderBy.map(o => `${quoteCol(o.column)} ${o.ascending === false ? "DESC" : "ASC"}${o.nullsFirst ? " NULLS FIRST" : ""}`).join(", ");
           }
           if (input.limit) { values.push(input.limit); sql += ` LIMIT $${values.length}`; }
           if (input.offset) { values.push(input.offset); sql += ` OFFSET $${values.length}`; }
@@ -299,9 +336,9 @@ export async function POST(req: NextRequest) {
           return Response.json({ data: result.rows, count: total });
         }
 
-        sql = `SELECT ${cols} FROM "${table}" ${whereClause}`;
+        sql = `SELECT ${cols} FROM "${table}"${joinSql} ${whereClause}`;
         if (orderBy.length) {
-          sql += " ORDER BY " + orderBy.map(o => `"${sanitizeIdentifier(o.column)}" ${o.ascending === false ? "DESC" : "ASC"}${o.nullsFirst ? " NULLS FIRST" : ""}`).join(", ");
+          sql += " ORDER BY " + orderBy.map(o => `${quoteCol(o.column)} ${o.ascending === false ? "DESC" : "ASC"}${o.nullsFirst ? " NULLS FIRST" : ""}`).join(", ");
         }
         if (input.limit) { values.push(input.limit); sql += ` LIMIT $${values.length}`; }
         if (input.offset) { values.push(input.offset); sql += ` OFFSET $${values.length}`; }
