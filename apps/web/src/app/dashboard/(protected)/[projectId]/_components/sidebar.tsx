@@ -34,7 +34,7 @@ const NAV_ITEMS = [
   { label: "API Docs",      icon: BookOpen,         suffix: "", external: "/docs/api" },
 ];
 
-export function ProjectSidebar({ projectId }: { projectId: string }) {
+export function ProjectSidebar({ projectId, projectName }: { projectId: string; projectName?: string }) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
   const base = `/dashboard/${projectId}`;
@@ -68,7 +68,14 @@ export function ProjectSidebar({ projectId }: { projectId: string }) {
         className="cursor-pointer p-4 border-b border-zinc-800 flex items-center gap-2.5 hover:bg-zinc-900 transition-colors h-14"
       >
         <Image src="/logo.png" alt="Postbase" width={28} height={28} className="shrink-0" />
-        {!collapsed && <span className="font-bold text-lg text-white truncate">Postbase</span>}
+        {!collapsed && (
+          <div className="flex flex-col min-w-0">
+            <span className="font-bold text-lg text-white leading-tight">Postbase</span>
+            {projectName && (
+              <span className="text-[10px] text-zinc-600 leading-tight truncate">{projectName}</span>
+            )}
+          </div>
+        )}
       </Link>
 
       {/* Nav */}

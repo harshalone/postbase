@@ -22,7 +22,7 @@ export default async function ProjectLayout({
 
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-100">
-      <ProjectSidebar projectId={projectId} />
+      <ProjectSidebar projectId={projectId} projectName={project.name} />
       <main className="flex-1 overflow-hidden">{children}</main>
     </div>
   );
