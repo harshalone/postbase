@@ -1434,7 +1434,7 @@ export default function DatabasePage({
           ).map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id)}
+              onClick={() => { setTab(id); if (id === "rls" && selectedTable) setSelectedRlsTable(selectedTable); }}
               className={`cursor-pointer flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 tab === id
                   ? "bg-zinc-800 text-white"
