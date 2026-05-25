@@ -202,6 +202,30 @@ export default function DatabasePage({
   // Selection state
   const [selectedRows, setSelectedRows] = useState<Set<string | number>>(new Set());
 
+  // Inline cell editing
+  const [editingCell, setEditingCell] = useState<{ rowIndex: number; colName: string; value: string } | null>(null);
+
+  async function saveInlineEdit(row: Record<string, unknown>, colName: string, newValue: string) {
+    if (!selectedTable || !pkCol) return;
+    const original = row[colName];
+    const strOriginal = original === null || original === undefined ? "" : String(original);
+    if (newValue === strOriginal) { setEditingCell(null); return; }
+    try {
+      const res = await fetch(`/api/dashboard/${projectId}/tables/${selectedTable}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ where: { [pkCol]: row[pkCol] }, set: { [colName]: newValue } }),
+      });
+      const data = await res.json();
+      if (data.error) { toast.error(data.error); return; }
+      fetchTableRows(selectedTable, tableOffset);
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setEditingCell(null);
+    }
+  }
+
   // Cell selection & context menu
   const [selectedCell, setSelectedCell] = useState<{ rowIndex: number; colName: string } | null>(null);
   const [cellContextMenu, setCellContextMenu] = useState<{
@@ -1663,19 +1687,37 @@ export default function DatabasePage({
                                     </td>
                                     {frozenColumns.map((col) => {
                                       const isCellSelected = selectedCell?.rowIndex === i && selectedCell?.colName === col.column_name;
+                                      const isEditingThis = editingCell?.rowIndex === i && editingCell?.colName === col.column_name;
                                       return (
                                         <td
                                           key={col.column_name}
-                                          className={`px-3 py-2 text-zinc-300 border-r border-zinc-800 max-w-xs truncate cursor-pointer select-none ${isCellSelected ? "ring-1 ring-inset ring-brand-500 bg-brand-500/5" : ""}`}
-                                          title={String(row[col.column_name] ?? "")}
+                                          className={`px-3 py-2 text-zinc-300 border-r border-zinc-800 max-w-xs truncate cursor-pointer select-none ${isCellSelected ? "ring-1 ring-inset ring-brand-500 bg-brand-500/5" : ""} ${isEditingThis ? "!p-0 ring-2 ring-inset ring-brand-500" : ""}`}
+                                          title={isEditingThis ? undefined : String(row[col.column_name] ?? "")}
                                           onClick={() => setSelectedCell({ rowIndex: i, colName: col.column_name })}
+                                          onDoubleClick={() => {
+                                            const val = row[col.column_name];
+                                            setEditingCell({ rowIndex: i, colName: col.column_name, value: val === null || val === undefined ? "" : String(val) });
+                                          }}
                                           onContextMenu={(e) => {
                                             e.preventDefault();
                                             setSelectedCell({ rowIndex: i, colName: col.column_name });
                                             setCellContextMenu({ x: e.clientX, y: e.clientY, row, rowIndex: i, colName: col.column_name });
                                           }}
                                         >
-                                          {row[col.column_name] === null || row[col.column_name] === undefined ? (
+                                          {isEditingThis ? (
+                                            <input
+                                              autoFocus
+                                              className="w-full h-full px-3 py-2 bg-zinc-900 text-zinc-100 text-xs focus:outline-none"
+                                              value={editingCell.value}
+                                              onChange={(e) => setEditingCell({ ...editingCell, value: e.target.value })}
+                                              onKeyDown={(e) => {
+                                                if (e.key === "Enter") { e.preventDefault(); saveInlineEdit(row, col.column_name, editingCell.value); }
+                                                if (e.key === "Escape") setEditingCell(null);
+                                              }}
+                                              onBlur={() => saveInlineEdit(row, col.column_name, editingCell.value)}
+                                              onClick={(e) => e.stopPropagation()}
+                                            />
+                                          ) : row[col.column_name] === null || row[col.column_name] === undefined ? (
                                             <span className="text-zinc-700 italic">NULL</span>
                                           ) : typeof row[col.column_name] === "object" ? (
                                             <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
@@ -1771,19 +1813,37 @@ export default function DatabasePage({
                                   )}
                                   {unfrozenColumns.map((col) => {
                                     const isCellSelected = selectedCell?.rowIndex === i && selectedCell?.colName === col.column_name;
+                                    const isEditingThis = editingCell?.rowIndex === i && editingCell?.colName === col.column_name;
                                     return (
                                       <td
                                         key={col.column_name}
-                                        className={`px-3 py-2 text-zinc-300 border-r border-zinc-800 last:border-r-0 max-w-xs truncate cursor-pointer select-none ${isCellSelected ? "ring-1 ring-inset ring-brand-500 bg-brand-500/5" : ""}`}
-                                        title={String(row[col.column_name] ?? "")}
+                                        className={`px-3 py-2 text-zinc-300 border-r border-zinc-800 last:border-r-0 max-w-xs truncate cursor-pointer select-none ${isCellSelected ? "ring-1 ring-inset ring-brand-500 bg-brand-500/5" : ""} ${isEditingThis ? "!p-0 ring-2 ring-inset ring-brand-500" : ""}`}
+                                        title={isEditingThis ? undefined : String(row[col.column_name] ?? "")}
                                         onClick={() => setSelectedCell({ rowIndex: i, colName: col.column_name })}
+                                        onDoubleClick={() => {
+                                          const val = row[col.column_name];
+                                          setEditingCell({ rowIndex: i, colName: col.column_name, value: val === null || val === undefined ? "" : String(val) });
+                                        }}
                                         onContextMenu={(e) => {
                                           e.preventDefault();
                                           setSelectedCell({ rowIndex: i, colName: col.column_name });
                                           setCellContextMenu({ x: e.clientX, y: e.clientY, row, rowIndex: i, colName: col.column_name });
                                         }}
                                       >
-                                        {row[col.column_name] === null || row[col.column_name] === undefined ? (
+                                        {isEditingThis ? (
+                                          <input
+                                            autoFocus
+                                            className="w-full h-full px-3 py-2 bg-zinc-900 text-zinc-100 text-xs focus:outline-none"
+                                            value={editingCell.value}
+                                            onChange={(e) => setEditingCell({ ...editingCell, value: e.target.value })}
+                                            onKeyDown={(e) => {
+                                              if (e.key === "Enter") { e.preventDefault(); saveInlineEdit(row, col.column_name, editingCell.value); }
+                                              if (e.key === "Escape") setEditingCell(null);
+                                            }}
+                                            onBlur={() => saveInlineEdit(row, col.column_name, editingCell.value)}
+                                            onClick={(e) => e.stopPropagation()}
+                                          />
+                                        ) : row[col.column_name] === null || row[col.column_name] === undefined ? (
                                           <span className="text-zinc-700 italic">NULL</span>
                                         ) : typeof row[col.column_name] === "object" ? (
                                           <span className="font-mono text-zinc-400">{JSON.stringify(row[col.column_name])}</span>
