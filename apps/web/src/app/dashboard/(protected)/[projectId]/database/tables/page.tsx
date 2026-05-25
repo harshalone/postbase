@@ -148,6 +148,129 @@ const COL_TYPES = [
   "boolean", "jsonb", "timestamptz", "date", "numeric",
 ];
 
+// ─── SQL result summary ───────────────────────────────────────────────────────
+
+function summarizeSqlResult(
+  sql: string,
+  command: string,
+  rowCount: number | null
+): { message: string; detail: string | null } {
+  const s = sql.trim();
+  const cmd = command.toUpperCase();
+
+  function extract(pattern: RegExp): string | null {
+    const m = pattern.exec(s);
+    if (!m) return null;
+    return (m[1] ?? m[2] ?? "").replace(/^"|"$/g, "");
+  }
+
+  const n = (count: number | null) =>
+    count === null ? "rows" : count === 1 ? "1 row" : `${count} rows`;
+
+  if (cmd === "SELECT") {
+    const count = rowCount ?? 0;
+    return { message: `Returned ${n(rowCount)}`, detail: count === 0 ? "Query matched no rows." : null };
+  }
+  if (cmd === "INSERT") {
+    const table = extract(/\bINSERT\s+INTO\s+(?:"([^"]+)"|(\S+))/i);
+    return { message: `Inserted ${n(rowCount)}${table ? ` into "${table}"` : ""}`, detail: null };
+  }
+  if (cmd === "UPDATE") {
+    const table = extract(/\bUPDATE\s+(?:"([^"]+)"|(\S+))/i);
+    return { message: `Updated ${n(rowCount)}${table ? ` in "${table}"` : ""}`, detail: rowCount === 0 ? "No rows matched the WHERE condition." : null };
+  }
+  if (cmd === "DELETE") {
+    const table = extract(/\bDELETE\s+FROM\s+(?:"([^"]+)"|(\S+))/i);
+    return { message: `Deleted ${n(rowCount)}${table ? ` from "${table}"` : ""}`, detail: rowCount === 0 ? "No rows matched the WHERE condition." : null };
+  }
+  if (cmd === "CREATE") {
+    if (/\bCREATE\s+TABLE\b/i.test(s)) {
+      const name = extract(/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|(\S+))/i);
+      return { message: `Table "${name ?? "unknown"}" created`, detail: null };
+    }
+    if (/\bCREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(s)) {
+      const idx = extract(/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|(\S+))/i);
+      const onTable = extract(/\bON\s+(?:"([^"]+)"|(\S+))/i);
+      return { message: `Index "${idx ?? "unknown"}" created${onTable ? ` on "${onTable}"` : ""}`, detail: null };
+    }
+    if (/\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\b/i.test(s)) {
+      const fn = extract(/\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\s+(?:"([^"]+)"|(\S+))/i);
+      return { message: `Function "${fn ?? "unknown"}" created`, detail: null };
+    }
+    if (/\bCREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i.test(s)) {
+      const view = extract(/\bCREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(?:"([^"]+)"|(\S+))/i);
+      return { message: `View "${view ?? "unknown"}" created`, detail: null };
+    }
+    if (/\bCREATE\s+TYPE\b/i.test(s)) {
+      const type = extract(/\bCREATE\s+TYPE\s+(?:"([^"]+)"|(\S+))/i);
+      return { message: `Type "${type ?? "unknown"}" created`, detail: null };
+    }
+    return { message: "Object created", detail: null };
+  }
+  if (cmd === "ALTER") {
+    const table = extract(/\bALTER\s+TABLE\s+(?:"([^"]+)"|(\S+))/i);
+    if (table) {
+      if (/\bADD\s+COLUMN\b/i.test(s)) {
+        const col = extract(/\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|(\S+))/i);
+        return { message: `Column "${col ?? "unknown"}" added to "${table}"`, detail: null };
+      }
+      if (/\bDROP\s+COLUMN\b/i.test(s)) {
+        const col = extract(/\bDROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?(?:"([^"]+)"|(\S+))/i);
+        return { message: `Column "${col ?? "unknown"}" dropped from "${table}"`, detail: null };
+      }
+      if (/\bRENAME\s+COLUMN\b/i.test(s)) {
+        const from = extract(/\bRENAME\s+COLUMN\s+(?:"([^"]+)"|(\S+))/i);
+        const to = extract(/\bTO\s+(?:"([^"]+)"|(\S+))/i);
+        return { message: `Column renamed from "${from ?? "?"}" to "${to ?? "?"}" on "${table}"`, detail: null };
+      }
+      if (/\bRENAME\s+TO\b/i.test(s)) {
+        const to = extract(/\bRENAME\s+TO\s+(?:"([^"]+)"|(\S+))/i);
+        return { message: `Table "${table}" renamed to "${to ?? "?"}"`, detail: null };
+      }
+      if (/\bADD\s+CONSTRAINT\b/i.test(s)) {
+        const c = extract(/\bADD\s+CONSTRAINT\s+(?:"([^"]+)"|(\S+))/i);
+        return { message: `Constraint "${c ?? "unknown"}" added to "${table}"`, detail: null };
+      }
+      if (/\bDROP\s+CONSTRAINT\b/i.test(s)) {
+        const c = extract(/\bDROP\s+CONSTRAINT\s+(?:"([^"]+)"|(\S+))/i);
+        return { message: `Constraint "${c ?? "unknown"}" dropped from "${table}"`, detail: null };
+      }
+      if (/\bALTER\s+COLUMN\b/i.test(s)) {
+        const col = extract(/\bALTER\s+COLUMN\s+(?:"([^"]+)"|(\S+))/i);
+        return { message: `Column "${col ?? "unknown"}" altered on "${table}"`, detail: null };
+      }
+      return { message: `Table "${table}" altered`, detail: null };
+    }
+    return { message: "Object altered", detail: null };
+  }
+  if (cmd === "DROP") {
+    if (/\bDROP\s+TABLE\b/i.test(s)) {
+      const name = extract(/\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:"([^"]+)"|(\S+))/i);
+      return { message: `Table "${name ?? "unknown"}" dropped`, detail: null };
+    }
+    if (/\bDROP\s+(?:UNIQUE\s+)?INDEX\b/i.test(s)) {
+      const name = extract(/\bDROP\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+EXISTS\s+)?(?:"([^"]+)"|(\S+))/i);
+      return { message: `Index "${name ?? "unknown"}" dropped`, detail: null };
+    }
+    if (/\bDROP\s+COLUMN\b/i.test(s)) {
+      const name = extract(/\bDROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?(?:"([^"]+)"|(\S+))/i);
+      return { message: `Column "${name ?? "unknown"}" dropped`, detail: null };
+    }
+    return { message: "Object dropped", detail: null };
+  }
+  if (cmd === "TRUNCATE") {
+    const name = extract(/\bTRUNCATE\s+(?:TABLE\s+)?(?:"([^"]+)"|(\S+))/i);
+    return { message: `Table "${name ?? "unknown"}" truncated — all rows removed`, detail: null };
+  }
+  if (cmd === "COPY") {
+    return { message: `COPY completed — ${n(rowCount)} imported`, detail: null };
+  }
+  if (cmd === "OK" || cmd === "") {
+    return { message: "Query executed successfully", detail: null };
+  }
+  return { message: `${cmd} executed successfully`, detail: null };
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function DatabasePage({
@@ -2073,10 +2196,9 @@ export default function DatabasePage({
                 <div className="px-4 py-2 border-b border-zinc-800 shrink-0 flex items-center gap-2">
                   <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Results</span>
                   {sqlResult && (
-                    <span className="text-xs text-zinc-500">
-                      {sqlResult.rowCount ?? sqlResult.rows.length} row{(sqlResult.rowCount ?? sqlResult.rows.length) !== 1 ? "s" : ""}
-                      {" · "}
+                    <span className="text-xs text-zinc-500 font-mono">
                       {sqlResult.command}
+                      {sqlResult.rowCount !== null && ` · ${sqlResult.rowCount} row${sqlResult.rowCount !== 1 ? "s" : ""}`}
                     </span>
                   )}
                 </div>
@@ -2088,9 +2210,19 @@ export default function DatabasePage({
                       Run a query to see results
                     </div>
                   ) : sqlResult.rows.length === 0 ? (
-                    <div className="px-4 py-3 text-xs text-zinc-500">
-                      {sqlResult.command === "SELECT" ? "Query returned 0 rows." : `${sqlResult.command} executed successfully.`}
-                    </div>
+                    (() => {
+                      const { message, detail } = summarizeSqlResult(sqlQuery, sqlResult.command, sqlResult.rowCount);
+                      return (
+                        <div className="px-4 py-4 flex items-start gap-3">
+                          <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                          <div>
+                            <p className="text-sm text-zinc-200 font-medium">{message}</p>
+                            {detail && <p className="text-xs text-zinc-500 mt-1">{detail}</p>}
+                            <p className="text-xs text-zinc-600 mt-1 font-mono">{sqlResult.command}{sqlResult.rowCount !== null ? ` · ${sqlResult.rowCount} row${sqlResult.rowCount !== 1 ? "s" : ""} affected` : ""}</p>
+                          </div>
+                        </div>
+                      );
+                    })()
                   ) : (
                     <table className="w-full text-xs font-mono border-collapse">
                       <thead>
