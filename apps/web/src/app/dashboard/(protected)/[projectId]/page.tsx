@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
+import { getBaseUrl } from "@/lib/get-base-url";
 import { PageHeader } from "./_components/page-header";
 import { CodeBlock } from "./_components/code-block";
 
@@ -11,9 +12,10 @@ export default async function ProjectOverviewPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
+  const baseUrl = getBaseUrl();
 
   const [project] = await db
-    .select({ databaseUrl: projects.databaseUrl })
+    .select()
     .from(projects)
     .where(eq(projects.id, projectId))
     .limit(1);
@@ -68,8 +70,25 @@ export default async function ProjectOverviewPage({
               </code>
             </li>
             <li>
-              Get your API keys from the API Keys tab and initialise the client:
-              <CodeBlock code={`import { createClient } from 'postbasejs';\n\nconst postbase = createClient(\n  '${process.env.NEXT_PUBLIC_APP_URL ?? 'https://your-postbase-instance.com'}',\n  'pb_anon_your_api_key',\n  { projectId: '${projectId}' }\n);`} />
+              Initialise the client with your API keys:
+              <CodeBlock
+                language="typescript"
+                code={`import { createClient } from 'postbasejs'
+
+// Anon client (browser-safe, respects RLS)
+const postbase = createClient(
+  '${baseUrl}',
+  '${projectId}',
+  '${project?.anonKey ?? 'pb_anon_...'}'
+)
+
+// Service role client (server-side only, bypasses RLS)
+const postbaseAdmin = createClient(
+  '${baseUrl}',
+  '${projectId}',
+  '${project?.serviceRoleKey ?? 'pb_service_...'}'
+)`}
+              />
             </li>
           </ol>
         </div>
