@@ -149,7 +149,7 @@ Body:
 
 **Join `on` expression rules:** identifiers and dotted `table.column` references only, with operators `=`, `<`, `>`, `!=`, `<=`, `>=`. No string literals, no functions, no subqueries — the server validates via a strict allow-list regex and rejects anything else.
 
-**Important:** Do NOT pass `"columns": ["*"]` — Postbase rejects the wildcard. Omit `columns` entirely to return all columns. When using joins, use `"table.column"` notation in `columns` to disambiguate.
+**Columns:** Omit `columns` entirely to return all columns, or pass `["*"]` — both are supported as of server ≥ 0.5.6. When using joins, use `"table.column"` notation in `columns` to disambiguate, or pass `"table.*"` to select all columns from a specific joined table.
 
 **Response:** `{ "data": [...], "count": N }` or a direct array `[...]`
 
@@ -279,6 +279,13 @@ const { data } = await postbase.from('posts').select().range(0, 19)
 
 **Filter methods:** `.eq` `.neq` `.gt` `.gte` `.lt` `.lte` `.like` `.ilike` `.in` `.is` `.contains` `.overlaps` `.textSearch` `.or` `.not`
 
+**`.or(filters)` — Supabase-compatible filter string.** The SDK parses `"col.op.value,col.op.value"` into structured filters. Commas inside parentheses are safe (used by `in`):
+```ts
+.or('email.ilike.%alice%,name.ilike.%alice%')
+.or('status.eq.active,status.in.(pending,review)')
+.eq('published', true).or('title.ilike.%q%,body.ilike.%q%')  // AND + OR
+```
+
 ```ts
 // Insert
 const { data, error } = await postbase.from('posts').insert({ title: 'Hello' }).select().single()
@@ -322,14 +329,27 @@ const { data } = await postbase
 - Operators allowed: `=` `<` `>` `!=` `<=` `>=`
 - No string literals, no functions, no subqueries, no `AND`/`OR`
 
-```ts
-// Valid
-{ on: 'orders.user_id = users.id' }
+**Column aliases (postbasejs ≥ 0.5.5)** — use `AS alias` to disambiguate colliding column names across joined tables. The SDK strips the alias before sending to the server (which rejects AS syntax) and renames the keys in the returned rows client-side.
 
-// Invalid — rejected by server
-{ on: "orders.status = 'active'" }        // string literals not allowed
-{ on: 'a.id = b.id AND a.x = b.x' }      // AND not allowed
+```ts
+// WRONG — both apis.id and pricing_plans.id come back as "id"; last one wins silently
+.select('apis.id, apis.name, pricing_plans.id, pricing_plans.name')
+
+// CORRECT — alias every colliding column
+const { data } = await postbase
+  .from('apis')
+  .join('pricing_plans', { on: 'apis.pricing_plan_id = pricing_plans.id', type: 'left' })
+  .select('apis.id as api_id, apis.name, pricing_plans.id as plan_id, pricing_plans.name as plan_name')
+// data[0] → { api_id: '...', name: '...', plan_id: '...', plan_name: '...' }
+
+// TypeScript — define your type using the aliased key names
+interface ApiWithPlan { api_id: string; name: string; plan_id: string; plan_name: string }
+const { data } = await postbase.from<ApiWithPlan>('apis')
+  .join('pricing_plans', { on: 'apis.pricing_plan_id = pricing_plans.id', type: 'left' })
+  .select('apis.id as api_id, apis.name, pricing_plans.id as plan_id, pricing_plans.name as plan_name')
 ```
+
+> Alias remapping is client-side only. The server never sees the `AS` clause — so `AS` syntax in `on:` expressions is still invalid.
 
 ### Raw SQL
 
@@ -342,18 +362,6 @@ const { data, error } = await postbase.sql<{ id: string; email: string }>(
    INNER JOIN users u ON o.user_id = u.id
    WHERE o.status = $1`,
   ['active']
-)
-
-// Multiple params
-const { data } = await postbase.sql<{ title: string; count: number }>(
-  `SELECT p.title, COUNT(c.id) AS count
-   FROM posts p
-   LEFT JOIN comments c ON c.post_id = p.id
-   WHERE p.author_id = $1 AND p.status = $2
-   GROUP BY p.id, p.title
-   ORDER BY count DESC
-   LIMIT $3`,
-  [userId, 'published', 10]
 )
 ```
 
@@ -422,95 +430,6 @@ await admin.auth.admin.deleteUser(userId)
 ```
 
 ### Storage
-
-#### Filename sanitization — REQUIRED before upload
-
-The Postbase server's upload route passes the object key directly to the S3 backend. Characters like `(`, `)`, spaces, and other non-URL-safe chars in filenames cause **500 errors** at the S3 `putObject` call. Always sanitize before calling `.upload()`:
-
-```js
-function safeName(file) {
-  const ext = file.name.includes('.') ? '.' + file.name.split('.').pop() : '';
-  const base = file.name.slice(0, file.name.length - ext.length);
-  const safeBase = base
-    .replace(/[^a-zA-Z0-9_-]/g, '-')  // strip unsafe chars
-    .replace(/-+/g, '-')               // collapse repeated dashes
-    .replace(/^-|-$/g, '');            // trim leading/trailing dashes
-  return safeBase + ext;
-}
-```
-
-Example: `207d8e34_(1).webp` → `207d8e34_-1-.webp` (parentheses removed, safe for S3).
-
-#### Upload options — use `upsert: false` for new files
-
-The postbasejs SDK sends **POST** when `upsert: false` and **PUT** when `upsert: true`. Use `upsert: false` for normal uploads; only use `upsert: true` when intentionally overwriting an existing object.
-
-```js
-// CORRECT — new file upload
-await postbase.storage.from('bucket').upload(safeName(file), file, {
-  cacheControl: '3600',
-  upsert: false,   // POST — correct for new files
-})
-
-// Only use upsert: true when you explicitly want to overwrite
-await postbase.storage.from('bucket').upload(safeName(file), file, {
-  upsert: true,    // PUT — overwrites existing object
-})
-```
-
-#### List response shape — NOT Supabase-compatible
-
-The Postbase list endpoint returns a **flat shape**, not the Supabase-style `{ id, name, metadata: { mimetype, size } }` shape. Always read from the correct fields:
-
-| What you need | Postbase field | ❌ Wrong (Supabase-style) |
-|---|---|---|
-| MIME type | `file.contentType` | `file.metadata?.mimetype` |
-| File size | `file.size` | `file.metadata?.size` |
-| Folder detection | no `id` field — use prefix or `.placeholder` convention | `file.id === null` |
-
-```js
-// CORRECT — Postbase list item shape
-// { name, size, contentType, createdAt, updatedAt }
-
-function isImageFile(file) {
-  if (file?.contentType?.startsWith('image/')) return true;
-  if (file?.metadata?.mimetype?.startsWith('image/')) return true; // fallback
-  return /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|avif)$/i.test(file?.name || '');
-}
-
-// size
-formatFileSize(file.size)           // ✓
-formatFileSize(file.metadata?.size) // ✗ always undefined
-```
-
-> **Why the extension fallback matters:** `contentType` is stored at upload time from the request `Content-Type` header. When using multipart/form-data the SDK sets the part's type from the File object — if the browser sniffs it wrong or the upload path doesn't preserve it, extension-based detection saves the preview.
-
-#### Mime type check caveat (server-side bug awareness)
-
-The Postbase storage route checks `allowedMimeTypes` against the request's `Content-Type` header. When using multipart/form-data (which the SDK always does), the header is `multipart/form-data; boundary=...` — not the file's actual mime type. If a bucket has `allowedMimeTypes` set and it doesn't include `multipart/form-data`, uploads will return **415**. Workaround: leave `allowedMimeTypes` empty on the bucket and enforce file type validation client-side.
-
-#### Server-side: list route response shape
-
-`POST /api/storage/v1/object/list/[bucket]` returns:
-
-```json
-{ "data": [{ "name": "photo.webp", "size": 4465, "contentType": "image/webp", "createdAt": "...", "updatedAt": "..." }] }
-```
-
-No `id`, no `metadata` wrapper. This differs from the Supabase Storage API — see the "List response shape" section above for correct field access.
-
-#### Server-side: how the upload route works
-
-For reference when debugging or extending the Postbase server (`/api/storage/v1/object/[bucket]/[...path]/route.ts`):
-
-1. Auth via `validateApiKey` on the `Authorization: Bearer` header
-2. Bucket looked up by name + projectId
-3. **Mime type check** uses `req.headers.get("content-type")` — this is `multipart/form-data; boundary=...` for SDK uploads, not the file's actual type
-4. File extracted from `form.get("file")` when multipart; raw body otherwise
-5. Size limit enforced against `bucket.fileSizeLimit`
-6. Object existence checked — 409 if exists and `upsert: false` (POST)
-7. `getStorageClient(projectId)` called — throws with 500 if `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, or `STORAGE_SECRET_KEY` env vars are missing and no per-project storage connection exists in DB
-8. `storage.putObject(bucket.name, objectPath, body, { contentType })` — object key is the raw URL path, so unsafe chars cause S3-level failures
 
 ```ts
 // Upload
@@ -965,7 +884,7 @@ When calling the Postbase REST API directly from Swift (no SDK):
 
 - **API key** → `Authorization: Bearer <key>` header
 - **User JWT** → `X-Postbase-Token: <token>` header (for RLS)
-- **Do NOT** pass `columns: ["*"]` — Postbase rejects the wildcard; omit `columns` entirely for all columns
+- Pass `columns: ["*"]` or omit `columns` entirely — both return all columns (fixed in server ≥ 0.5.6)
 - **Do NOT** send `X-Project-ID` — not a real Postbase header; project is identified by the API key
 - **Upsert** does not accept an `onConflict` field in the REST body — conflict resolution is configured server-side on the table
 - Filter objects must use the key `"operator"` (not `"op"`)

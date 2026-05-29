@@ -149,7 +149,7 @@ Body:
 
 **Join `on` expression rules:** identifiers and dotted `table.column` references only, with operators `=`, `<`, `>`, `!=`, `<=`, `>=`. No string literals, no functions, no subqueries — the server validates via a strict allow-list regex and rejects anything else.
 
-**Important:** Do NOT pass `"columns": ["*"]` — Postbase rejects the wildcard. Omit `columns` entirely to return all columns. When using joins, use `"table.column"` notation in `columns` to disambiguate.
+**Columns:** Omit `columns` entirely to return all columns, or pass `["*"]` — both are supported as of server ≥ 0.5.6. When using joins, use `"table.column"` notation in `columns` to disambiguate, or pass `"table.*"` to select all columns from a specific joined table.
 
 **Response:** `{ "data": [...], "count": N }` or a direct array `[...]`
 
@@ -279,6 +279,13 @@ const { data } = await postbase.from('posts').select().range(0, 19)
 
 **Filter methods:** `.eq` `.neq` `.gt` `.gte` `.lt` `.lte` `.like` `.ilike` `.in` `.is` `.contains` `.overlaps` `.textSearch` `.or` `.not`
 
+**`.or(filters)` — Supabase-compatible filter string.** The SDK parses `"col.op.value,col.op.value"` into structured filters. Commas inside parentheses are safe (used by `in`):
+```ts
+.or('email.ilike.%alice%,name.ilike.%alice%')
+.or('status.eq.active,status.in.(pending,review)')
+.eq('published', true).or('title.ilike.%q%,body.ilike.%q%')  // AND + OR
+```
+
 ```ts
 // Insert
 const { data, error } = await postbase.from('posts').insert({ title: 'Hello' }).select().single()
@@ -321,6 +328,28 @@ const { data } = await postbase
 - `table.column OPERATOR table.column` — identifiers and dotted refs only
 - Operators allowed: `=` `<` `>` `!=` `<=` `>=`
 - No string literals, no functions, no subqueries, no `AND`/`OR`
+
+**Column aliases (postbasejs ≥ 0.5.5)** — use `AS alias` to disambiguate colliding column names across joined tables. The SDK strips the alias before sending to the server (which rejects AS syntax) and renames the keys in the returned rows client-side.
+
+```ts
+// WRONG — both apis.id and pricing_plans.id come back as "id"; last one wins silently
+.select('apis.id, apis.name, pricing_plans.id, pricing_plans.name')
+
+// CORRECT — alias every colliding column
+const { data } = await postbase
+  .from('apis')
+  .join('pricing_plans', { on: 'apis.pricing_plan_id = pricing_plans.id', type: 'left' })
+  .select('apis.id as api_id, apis.name, pricing_plans.id as plan_id, pricing_plans.name as plan_name')
+// data[0] → { api_id: '...', name: '...', plan_id: '...', plan_name: '...' }
+
+// TypeScript — define your type using the aliased key names
+interface ApiWithPlan { api_id: string; name: string; plan_id: string; plan_name: string }
+const { data } = await postbase.from<ApiWithPlan>('apis')
+  .join('pricing_plans', { on: 'apis.pricing_plan_id = pricing_plans.id', type: 'left' })
+  .select('apis.id as api_id, apis.name, pricing_plans.id as plan_id, pricing_plans.name as plan_name')
+```
+
+> Alias remapping is client-side only. The server never sees the `AS` clause — so `AS` syntax in `on:` expressions is still invalid.
 
 ### Raw SQL
 
@@ -855,7 +884,7 @@ When calling the Postbase REST API directly from Swift (no SDK):
 
 - **API key** → `Authorization: Bearer <key>` header
 - **User JWT** → `X-Postbase-Token: <token>` header (for RLS)
-- **Do NOT** pass `columns: ["*"]` — Postbase rejects the wildcard; omit `columns` entirely for all columns
+- Pass `columns: ["*"]` or omit `columns` entirely — both return all columns (fixed in server ≥ 0.5.6)
 - **Do NOT** send `X-Project-ID` — not a real Postbase header; project is identified by the API key
 - **Upsert** does not accept an `onConflict` field in the REST body — conflict resolution is configured server-side on the table
 - Filter objects must use the key `"operator"` (not `"op"`)

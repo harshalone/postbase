@@ -74,7 +74,8 @@ const filterSchema = z.object({
   value: z.unknown(),
 });
 
-const orFilterSchema = z.string(); // raw filter string like "name.eq.foo,age.gt.18"
+// orFilters accepts either the legacy raw string or the new structured Filter[] format
+const orFilterSchema = z.union([z.string(), z.array(filterSchema)]);
 const notFilterSchema = z.object({ column: z.string(), operator: z.string(), value: z.unknown() });
 
 const joinSchema = z.object({
@@ -132,7 +133,7 @@ const querySchema = z.discriminatedUnion("operation", [
 ]);
 
 type QueryInput = z.infer<typeof querySchema>;
-type Filter = { column: string; operator: string; value: unknown };
+type Filter = { column: string; operator: string; value?: unknown };
 
 function sanitizeIdentifier(name: string): string {
   if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(name)) {
@@ -205,7 +206,45 @@ function buildFilterClause(filter: Filter, values: unknown[]): string {
   }
 }
 
-function buildWhereClause(filters: Filter[], orFilters: string[], notFilters: Array<{ column: string; operator: string; value: unknown }>, values: unknown[]): string {
+type OrFilterEntry = string | Filter[];
+
+function parseOrFilterString(orStr: string): Filter[] {
+  // Split on commas not inside parentheses, then parse col.op.value segments
+  const segments: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < orStr.length; i++) {
+    if (orStr[i] === "(") depth++;
+    else if (orStr[i] === ")") depth--;
+    else if (orStr[i] === "," && depth === 0) {
+      segments.push(orStr.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  segments.push(orStr.slice(start).trim());
+
+  return segments.filter(Boolean).map((seg) => {
+    const firstDot = seg.indexOf(".");
+    const secondDot = seg.indexOf(".", firstDot + 1);
+    if (firstDot === -1 || secondDot === -1) return { column: seg, operator: "eq" as const, value: null };
+    const column = seg.slice(0, firstDot);
+    const operator = seg.slice(firstDot + 1, secondDot) as Filter["operator"];
+    const rawValue = seg.slice(secondDot + 1);
+    let value: unknown = rawValue;
+    if (operator === "in") {
+      value = rawValue.replace(/^\(/, "").replace(/\)$/, "").split(",").map((v) => v.trim());
+    } else if (rawValue === "true") {
+      value = true;
+    } else if (rawValue === "false") {
+      value = false;
+    } else if (rawValue === "null") {
+      value = null;
+    }
+    return { column, operator, value };
+  });
+}
+
+function buildWhereClause(filters: Filter[], orFilters: OrFilterEntry[], notFilters: Filter[], values: unknown[]): string {
   const parts: string[] = [];
 
   for (const f of filters) {
@@ -216,13 +255,9 @@ function buildWhereClause(filters: Filter[], orFilters: string[], notFilters: Ar
     parts.push(`NOT (${buildFilterClause(notF, values)})`);
   }
 
-  // orFilters are strings like "status.eq.active,role.eq.admin"
-  for (const orStr of orFilters) {
-    const orParts = orStr.split(",").map((part) => {
-      const [col, op, ...rest] = part.trim().split(".");
-      const val = rest.join(".");
-      return buildFilterClause({ column: col, operator: op, value: val }, values);
-    });
+  for (const entry of orFilters) {
+    const filterGroup: Filter[] = typeof entry === "string" ? parseOrFilterString(entry) : entry;
+    const orParts = filterGroup.map((f) => buildFilterClause(f, values));
     if (orParts.length > 0) parts.push(`(${orParts.join(" OR ")})`);
   }
 
@@ -300,8 +335,10 @@ export async function POST(req: NextRequest) {
 
         // Quote a column, handling optional table prefix (e.g. "orders.id" → "orders"."id")
         function quoteCol(c: string): string {
+          if (c === "*") return "*";
           const parts = c.split(".");
           if (parts.length === 2) {
+            if (parts[1] === "*") return `"${sanitizeIdentifier(parts[0])}".*`;
             return `"${sanitizeIdentifier(parts[0])}"."${sanitizeIdentifier(parts[1])}"`;
           }
           return `"${sanitizeIdentifier(c)}"`;
