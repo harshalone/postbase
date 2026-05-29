@@ -65,7 +65,11 @@ Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 
 - **25+ Auth Providers** — Google, GitHub, Discord, Magic Link, Passkeys, SMS OTP, SAML/SSO, and more — all toggleable from the dashboard
 - **Database API** — Query your PostgreSQL via `anon key` (respects RLS) or `service_role key` (full access)
+- **JOIN & Raw SQL** — `JOIN` across tables or run raw SQL via the SDK; AI-powered SQL editor with human-readable result summaries
+- **Table Explorer** — Inline cell editing, column filtering, full-text row search, and CSV import directly from the dashboard
+- **RLS Policies** — Row Level Security policy editor with live preview
 - **File Storage** — S3-compatible object storage with bucket policies
+- **Cron Jobs** — SQL or HTTP jobs on any schedule; full run history with request/response detail panel, date filter, and bulk delete
 - **Multi-project** — One Postbase instance can serve multiple apps
 - **Self-hosted** — Single `docker compose up` and you're running
 
@@ -81,24 +85,11 @@ cd postbase
 cp .env.example .env
 ```
 
-Open `.env` and set your secret:
+Generate and set a secret in `.env`:
 
 ```bash
-# Generate a secure secret
-openssl rand -base64 32
+openssl rand -base64 32   # paste output as NEXTAUTH_SECRET
 ```
-
-### 1 Run the dev sh
-```
-./dev.sh
-
-./dev.sh --rebuild  
-
-./dev.sh --reset
-
-```
-
-Paste the output as `NEXTAUTH_SECRET` in your `.env`.
 
 ### 2. Start the services
 
@@ -132,6 +123,16 @@ Visit [http://localhost:3000/dashboard](http://localhost:3000/dashboard)
 ## Local Development
 
 For development you don't need to rebuild Docker on every change. Run only the infrastructure (PostgreSQL + MinIO) in Docker and the Next.js app locally with hot reload.
+
+The quickest way is the included `dev.sh` script:
+
+```bash
+./dev.sh           # start infra + app (hot reload)
+./dev.sh --rebuild # rebuild containers
+./dev.sh --reset   # wipe data and restart clean
+```
+
+Or manually:
 
 ### 1. Start infrastructure only
 
@@ -293,6 +294,21 @@ await postbase.from('posts').update({ title: 'Updated' }).eq('id', postId)
 
 // DELETE
 await postbase.from('posts').delete().eq('id', postId)
+
+// OR filters
+const { data } = await postbase
+  .from('posts')
+  .select('*')
+  .orFilters([{ column: 'status', op: 'eq', value: 'draft' }, { column: 'status', op: 'eq', value: 'published' }])
+
+// JOIN across tables
+const { data } = await postbase
+  .from('posts')
+  .select('id, title, users(name, email)')
+  .join({ table: 'users', on: 'posts.user_id = users.id' })
+
+// Raw SQL (service_role key required)
+const { data } = await postbase.sql('SELECT count(*) FROM posts WHERE created_at > $1', ['2024-01-01'])
 ```
 
 > **anon key** — enforces Row Level Security policies on your tables.
