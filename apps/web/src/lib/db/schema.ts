@@ -249,6 +249,7 @@ export const cronJobs = postbaseSchema.table(
     schedule: text("schedule").notNull(),
     command: text("command").notNull(),
     active: boolean("active").default(true).notNull(),
+    retentionDays: integer("retention_days").default(3),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

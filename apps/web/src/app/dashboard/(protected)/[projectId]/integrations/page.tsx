@@ -530,10 +530,8 @@ export default function IntegrationsPage({
   const [tab, setTab] = useState<Tab>("cron");
 
   // ── Cron state ──────────────────────────────────────────────────────────────
-  const [cronInstalled, setCronInstalled] = useState<boolean | null>(null);
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
   const [cronLoading, setCronLoading] = useState(true);
-  const [installingCron, setInstallingCron] = useState(false);
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [editingJob, setEditingJob] = useState<CronJob | null>(null);
@@ -561,7 +559,6 @@ export default function IntegrationsPage({
     try {
       const res = await fetch(`/api/dashboard/${projectId}/cron`);
       const data = await res.json();
-      setCronInstalled(data.installed !== false);
       setCronJobs(data.jobs ?? []);
     } finally {
       setCronLoading(false);
@@ -584,25 +581,6 @@ export default function IntegrationsPage({
   useEffect(() => { if (tab === "queues" && queueInstalled === null) fetchQueues(); }, [tab, fetchQueues, queueInstalled]);
 
   // ── Cron actions ──────────────────────────────────────────────────────────────
-
-  async function installCron() {
-    setInstallingCron(true);
-    try {
-      const res = await fetch(`/api/dashboard/${projectId}/cron`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "install" }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        toast.error(data.error);
-        return;
-      }
-      await fetchCron();
-    } finally {
-      setInstallingCron(false);
-    }
-  }
 
   function detectType(command: string): JobType {
     return command.startsWith(HTTP_PREFIX) ? "http" : "sql";
@@ -814,13 +792,6 @@ export default function IntegrationsPage({
           <div className="flex flex-col h-full">
             {cronLoading ? (
               <p className="text-zinc-600 text-sm pt-8 text-center">Loading…</p>
-            ) : !cronInstalled ? (
-              <NotInstalled
-                name="pg_cron"
-                description="pg_cron is a cron-based job scheduler for PostgreSQL. It lets you schedule SQL commands to run at regular intervals, directly in your database."
-                onInstall={installCron}
-                installing={installingCron}
-              />
             ) : (
               <>
                 {/* Cron toolbar */}

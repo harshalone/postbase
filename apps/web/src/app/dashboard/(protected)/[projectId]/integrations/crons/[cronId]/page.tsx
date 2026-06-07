@@ -33,6 +33,7 @@ type CronJob = {
   schedule: string;
   command: string;
   active: boolean;
+  retention_days: number | null;
 };
 
 const HTTP_PREFIX = "__http__:";
@@ -291,6 +292,84 @@ function ConfirmDeleteModal({
   );
 }
 
+// ─── Retention selector ───────────────────────────────────────────────────────
+
+const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
+  { label: "No limit", value: null },
+  { label: "1 day", value: 1 },
+  { label: "3 days", value: 3 },
+  { label: "1 week", value: 7 },
+  { label: "2 weeks", value: 14 },
+  { label: "1 month", value: 30 },
+];
+
+function RetentionSelector({
+  projectId,
+  cronId,
+  currentDays,
+  onSaved,
+}: {
+  projectId: string;
+  cronId: string;
+  currentDays: number | null;
+  onSaved: (days: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const current = RETENTION_OPTIONS.find((o) => o.value === currentDays) ?? { label: "3 days", value: 3 };
+
+  const select = async (days: number | null) => {
+    setSaving(true);
+    setOpen(false);
+    try {
+      await fetch(`/api/dashboard/${projectId}/cron`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: cronId, retentionDays: days }),
+      });
+      onSaved(days);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={saving}
+        className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-50"
+        title="Auto-delete runs older than…"
+      >
+        <Trash2 size={11} className="text-zinc-500" />
+        {saving ? "Saving…" : `Retention: ${current.label}`}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-40 bg-zinc-950 border border-zinc-800 rounded-lg shadow-xl py-1 min-w-[140px]">
+            {RETENTION_OPTIONS.map((opt) => (
+              <button
+                key={String(opt.value)}
+                onClick={() => select(opt.value)}
+                className={`cursor-pointer w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                  opt.value === currentDays
+                    ? "text-brand-400 bg-zinc-900"
+                    : "text-zinc-300 hover:bg-zinc-900 hover:text-white"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const LIMIT = 50;
@@ -304,6 +383,7 @@ export default function CronDashboardPage({
   const router = useRouter();
 
   const [job, setJob] = useState<CronJob | null>(null);
+  const [retentionDays, setRetentionDays] = useState<number | null>(3);
   const [runs, setRuns] = useState<CronRun[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -340,6 +420,7 @@ export default function CronDashboardPage({
         if (!res.ok) { router.push(`/dashboard/${projectId}/integrations`); return; }
         const data = await res.json();
         setJob(data.job);
+        setRetentionDays(data.job.retention_days ?? 3);
         setRuns(data.runs);
         setTotal(data.total);
         setPage(data.page);
@@ -464,6 +545,14 @@ export default function CronDashboardPage({
           >
             {job.active ? "Active" : "Paused"}
           </span>
+        )}
+        {job && (
+          <RetentionSelector
+            projectId={projectId}
+            cronId={cronId}
+            currentDays={retentionDays}
+            onSaved={setRetentionDays}
+          />
         )}
         <button
           onClick={() => fetchRuns(page, fromDate || undefined, toDate || undefined)}

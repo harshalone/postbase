@@ -105,7 +105,7 @@ export async function POST(
         })
         .returning();
 
-      scheduleJob(job.id, projectId, job.schedule, job.command, project.databaseUrl);
+      scheduleJob(job.id, projectId, job.schedule, job.command, project.databaseUrl, job.retentionDays);
       return NextResponse.json({ ok: true });
     }
 
@@ -121,7 +121,7 @@ export async function POST(
       if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
       if (job.active) {
-        scheduleJob(job.id, projectId, job.schedule, job.command, project.databaseUrl);
+        scheduleJob(job.id, projectId, job.schedule, job.command, project.databaseUrl, job.retentionDays);
       } else {
         unscheduleJob(job.id);
       }
@@ -149,4 +149,36 @@ export async function POST(
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 400 });
   }
+}
+
+// PATCH /api/dashboard/[projectId]/cron — update retention_days for a job
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId } = await params;
+  const project = await getProject(projectId);
+  if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+  const body = await req.json() as { jobId: string; retentionDays: number | null };
+  const { jobId, retentionDays } = body;
+
+  if (!jobId) return NextResponse.json({ error: "jobId required" }, { status: 400 });
+  if (retentionDays !== null && retentionDays !== undefined && (typeof retentionDays !== "number" || retentionDays < 1)) {
+    return NextResponse.json({ error: "retentionDays must be a positive integer or null" }, { status: 400 });
+  }
+
+  const [job] = await db
+    .update(cronJobs)
+    .set({ retentionDays: retentionDays ?? null, updatedAt: new Date() })
+    .where(and(eq(cronJobs.id, jobId), eq(cronJobs.projectId, projectId)))
+    .returning();
+
+  if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+
+  if (job.active) {
+    scheduleJob(job.id, projectId, job.schedule, job.command, project.databaseUrl, job.retentionDays);
+  }
+
+  return NextResponse.json({ ok: true });
 }

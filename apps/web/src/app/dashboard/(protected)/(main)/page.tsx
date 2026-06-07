@@ -67,6 +67,7 @@ export default async function DashboardPage() {
                     projectId={project.id}
                     name={project.name}
                     slug={project.slug}
+                    organisationId={project.organisationId}
                   />
                 ))}
               </div>

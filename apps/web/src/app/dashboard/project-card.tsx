@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MoreVertical, Trash2, AlertTriangle } from "lucide-react";
+import { MoreVertical, Trash2, AlertTriangle, Copy } from "lucide-react";
+import { CopyProjectDialog } from "./copy-project-dialog";
 
 function DeleteModal({
   projectId,
@@ -148,13 +149,16 @@ export function ProjectCard({
   projectId,
   name,
   slug,
+  organisationId,
 }: {
   projectId: string;
   name: string;
   slug: string;
+  organisationId?: string | null;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -194,7 +198,15 @@ export function ProjectCard({
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-36">
+            <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+              <button
+                onClick={(e) => { e.preventDefault(); setMenuOpen(false); setCopyOpen(true); }}
+                className="cursor-pointer w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+              >
+                <Copy size={13} />
+                Copy project
+              </button>
+              <div className="my-1 border-t border-zinc-800" />
               <button
                 onClick={(e) => { e.preventDefault(); setMenuOpen(false); setDeleteOpen(true); }}
                 className="cursor-pointer w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-zinc-800 transition-colors"
@@ -212,6 +224,15 @@ export function ProjectCard({
           projectId={projectId}
           projectName={name}
           onClose={() => { setDeleteOpen(false); }}
+        />
+      )}
+
+      {copyOpen && (
+        <CopyProjectDialog
+          projectId={projectId}
+          projectName={name}
+          defaultOrgId={organisationId ?? null}
+          onClose={() => { setCopyOpen(false); }}
         />
       )}
     </>

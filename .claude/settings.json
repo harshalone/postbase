@@ -129,7 +129,11 @@
       "Bash(grep -r \"createActionURL\\\\|export.*\\\\bAuth\\\\b\" /Volumes/2TB/code/postbase.com/node_modules/.pnpm/@auth+core@0.41.0*/node_modules/@auth/core/index.d.ts)",
       "Bash(pnpm why:*)",
       "Bash(xargs -I{} sh -c 'grep \"\\\\\"version\\\\\"\" {} | head -1')",
-      "Bash(pnpm --filter web build)"
+      "Bash(pnpm --filter web build)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com add apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/\\\\[projectId\\\\]/page.tsx)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com commit -m \"feat: show real API keys in overview quick start snippet\")",
+      "Bash(mkdir -p /Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/\\\\[projectId\\\\]/copy)",
+      "Bash(PGPASSWORD=postbase psql -h localhost -U postbase -d postbase -c \"SELECT id, name, slug FROM _postbase.projects;\")"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",
@@ -148,7 +152,9 @@
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/(protected)/[projectId]/database/import",
       "/Volumes/2TB/code/npm-packages/postbasejs/src",
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/email/v1/[projectId]",
-      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]/storage"
+      "/Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/[projectId]/storage",
+      "/Volumes/2TB/code/oddcircles-postbase/src/app/auth/signin",
+      "/Volumes/2TB/code/oddcircles-postbase/src/app/auth/signup"
     ]
   }
 }

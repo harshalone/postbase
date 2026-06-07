@@ -63,6 +63,7 @@ export async function GET(
       schedule: job.schedule,
       command: job.command,
       active: job.active,
+      retention_days: job.retentionDays,
     },
     runs: runs.map((r) => ({
       id: r.id,

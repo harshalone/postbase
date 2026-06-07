@@ -1,7 +1,7 @@
 import * as nodeCron from "node-cron";
 import { db } from "@/lib/db";
 import { cronJobs, cronJobRuns, projects } from "@/lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import { getProjectPool, getProjectSchema } from "@/lib/project-db";
 
 type ScheduledTask = nodeCron.ScheduledTask;
@@ -42,7 +42,8 @@ async function runJob(
   jobId: string,
   projectId: string,
   command: string,
-  databaseUrl: string | null
+  databaseUrl: string | null,
+  retentionDays: number | null
 ) {
   const [run] = await db
     .insert(cronJobRuns)
@@ -86,17 +87,12 @@ async function runJob(
     .set({ status, returnMessage, responseBody, endTime: new Date() })
     .where(eq(cronJobRuns.id, run.id));
 
-  // Prune runs older than the last 100 for this job
-  const allRuns = await db
-    .select({ id: cronJobRuns.id })
-    .from(cronJobRuns)
-    .where(eq(cronJobRuns.jobId, jobId))
-    .orderBy(cronJobRuns.startTime)
-    .limit(1000);
-
-  if (allRuns.length > 100) {
-    const toDelete = allRuns.slice(0, allRuns.length - 100).map((r) => r.id);
-    await db.delete(cronJobRuns).where(inArray(cronJobRuns.id, toDelete));
+  if (retentionDays !== null && retentionDays > 0) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retentionDays);
+    await db
+      .delete(cronJobRuns)
+      .where(and(eq(cronJobRuns.jobId, jobId), lt(cronJobRuns.startTime, cutoff)));
   }
 }
 
@@ -105,7 +101,8 @@ export function scheduleJob(
   projectId: string,
   schedule: string,
   command: string,
-  databaseUrl: string | null
+  databaseUrl: string | null,
+  retentionDays: number | null = null
 ) {
   unscheduleJob(jobId);
 
@@ -115,7 +112,7 @@ export function scheduleJob(
   }
 
   const task = nodeCron.schedule(schedule, () => {
-    runJob(jobId, projectId, command, databaseUrl).catch((err) =>
+    runJob(jobId, projectId, command, databaseUrl, retentionDays).catch((err) =>
       console.error(`[scheduler] job ${jobId} runner error:`, err)
     );
   });
@@ -143,6 +140,7 @@ export async function loadAllJobs() {
       projectId: cronJobs.projectId,
       schedule: cronJobs.schedule,
       command: cronJobs.command,
+      retentionDays: cronJobs.retentionDays,
     })
     .from(cronJobs)
     .where(eq(cronJobs.active, true));
@@ -161,7 +159,7 @@ export async function loadAllJobs() {
   const dbUrlMap = new Map(projectRows.map((p) => [p.id, p.databaseUrl]));
 
   for (const job of activeJobs) {
-    scheduleJob(job.id, job.projectId, job.schedule, job.command, dbUrlMap.get(job.projectId) ?? null);
+    scheduleJob(job.id, job.projectId, job.schedule, job.command, dbUrlMap.get(job.projectId) ?? null, job.retentionDays);
   }
 
   console.log(`[scheduler] loaded ${activeJobs.length} active cron job(s)`);
