@@ -5,6 +5,23 @@ import { emailSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { createTransport } from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
+import { createHmac } from "crypto";
+
+function deriveSesSMTPPassword(secretKey: string, region: string): string {
+  const date = "11111111";
+  const service = "ses";
+  const terminal = "aws4_request";
+  const message = "SendRawEmail";
+  const version = Buffer.from([0x04]);
+
+  const kDate = createHmac("sha256", `AWS4${secretKey}`).update(date).digest();
+  const kRegion = createHmac("sha256", kDate).update(region).digest();
+  const kService = createHmac("sha256", kRegion).update(service).digest();
+  const kTerminal = createHmac("sha256", kService).update(terminal).digest();
+  const kMessage = createHmac("sha256", kTerminal).update(message).digest();
+  const signatureAndVersion = Buffer.concat([version, kMessage]);
+  return signatureAndVersion.toString("base64");
+}
 
 const schema = z.object({
   projectId: z.string().uuid(),
@@ -50,12 +67,14 @@ export async function POST(req: NextRequest) {
       auth: { user: settings.sesSmtpUsername!, pass: settings.sesSmtpPassword! },
     };
   } else if (isSesIamConfigured) {
-    const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
+    const sesRegion = settings.sesRegion ?? "us-east-1";
+    const sesSmtpHost = `email-smtp.${sesRegion}.amazonaws.com`;
+    const smtpPassword = deriveSesSMTPPassword(settings.sesSecretAccessKey!, sesRegion);
     transportConfig = {
       host: sesSmtpHost,
       port: 587,
       secure: false,
-      auth: { user: settings.sesAccessKeyId!, pass: settings.sesSecretAccessKey! },
+      auth: { user: settings.sesAccessKeyId!, pass: smtpPassword },
     };
   } else {
     transportConfig = {
