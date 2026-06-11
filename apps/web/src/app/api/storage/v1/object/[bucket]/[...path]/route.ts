@@ -151,6 +151,7 @@ async function upload(req: NextRequest, params: Params, upsert: boolean) {
   }
 
   let body: Uint8Array;
+  let effectiveContentType = contentType;
   const formData = req.headers.get("content-type")?.includes("multipart/form-data");
 
   if (formData) {
@@ -158,6 +159,8 @@ async function upload(req: NextRequest, params: Params, upsert: boolean) {
     const file = form.get("file") as File | null;
     if (!file) return Response.json({ error: "No file provided" }, { status: 400 });
     body = new Uint8Array(await file.arrayBuffer());
+    // Use the file's actual mime type, not the multipart envelope's content-type
+    if (file.type) effectiveContentType = file.type;
   } else {
     body = new Uint8Array(await req.arrayBuffer());
   }
@@ -179,21 +182,21 @@ async function upload(req: NextRequest, params: Params, upsert: boolean) {
   }
 
   const storage = await getStorageClient(keyInfo.projectId);
-  await storage.putObject(bucket.name, objectPath, body, { contentType });
+  await storage.putObject(bucket.name, objectPath, body, { contentType: effectiveContentType });
 
   const userId = await resolveUserId(req, keyInfo.projectId);
 
   if (existing) {
     await db
       .update(storageObjects)
-      .set({ size: body.byteLength, mimeType: contentType })
+      .set({ size: body.byteLength, mimeType: effectiveContentType })
       .where(eq(storageObjects.id, existing.id));
   } else {
     await db.insert(storageObjects).values({
       bucketId: bucket.id,
       name: objectPath,
       size: body.byteLength,
-      mimeType: contentType,
+      mimeType: effectiveContentType,
       ownerId: userId,
     });
   }

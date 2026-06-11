@@ -244,6 +244,19 @@ async function deriveSigningKey(secret: string, date: string, region: string): P
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
+export async function getEnvStorageClient(): Promise<StorageAdapter> {
+  const endpoint = process.env.STORAGE_ENDPOINT;
+  const accessKeyId = process.env.STORAGE_ACCESS_KEY;
+  const secretAccessKey = process.env.STORAGE_SECRET_KEY;
+  const region = process.env.STORAGE_REGION ?? "auto";
+
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
+    throw new Error("No env-level storage configured.");
+  }
+
+  return new S3Client(endpoint, accessKeyId, secretAccessKey, region);
+}
+
 export async function getStorageClient(projectId: string): Promise<StorageAdapter> {
   // Look for a default storage connection for this project
   const [conn] = await db
