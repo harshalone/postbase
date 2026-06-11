@@ -133,7 +133,15 @@
       "Bash(git -C /Volumes/2TB/code/postbase.com add apps/web/src/app/dashboard/\\\\\\(protected\\\\\\)/\\\\[projectId\\\\]/page.tsx)",
       "Bash(git -C /Volumes/2TB/code/postbase.com commit -m \"feat: show real API keys in overview quick start snippet\")",
       "Bash(mkdir -p /Volumes/2TB/code/postbase.com/apps/web/src/app/api/dashboard/projects/\\\\[projectId\\\\]/copy)",
-      "Bash(PGPASSWORD=postbase psql -h localhost -U postbase -d postbase -c \"SELECT id, name, slug FROM _postbase.projects;\")"
+      "Bash(PGPASSWORD=postbase psql -h localhost -U postbase -d postbase -c \"SELECT id, name, slug FROM _postbase.projects;\")",
+      "Bash(node_modules/.bin/tsc --noEmit -p apps/web)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com log --oneline -20 -- package.json)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com log --oneline --grep=\"version\" -10)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com diff apps/web/src/lib/copy-project.ts)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com log -p --follow -S'\"version\"' -- package.json)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com diff .claude/settings.json)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com add -A)",
+      "Bash(git -C /Volumes/2TB/code/postbase.com commit -m 'fix: extension-aware schema rewriting and enum type copy in copy project; bump version to 0.3.1 *)"
     ],
     "additionalDirectories": [
       "/Volumes/2TB/code/postbase.com/apps/web/src/app/dashboard/[projectId]",

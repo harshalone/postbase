@@ -32,6 +32,83 @@ export interface CopyDataResult {
 
 const AUTH_TABLES = new Set(["users", "accounts", "sessions", "verification_tokens"]);
 
+// Names of extension-owned objects (types, functions, operator classes) living in
+// the source schema. Extensions are database-wide and can only be installed once,
+// so when an extension (e.g. pgvector) was installed with its objects in the source
+// project's schema, the copy must keep references pointing at that schema instead
+// of rewriting them to the destination schema — and must never copy the objects.
+async function getExtensionOwnedNames(client: PoolClient, schema: string): Promise<Set<string>> {
+  const { rows } = await client.query<{ objname: string }>(
+    `SELECT t.typname AS objname FROM pg_type t
+       JOIN pg_namespace n ON n.oid = t.typnamespace
+       JOIN pg_depend d ON d.classid = 'pg_type'::regclass AND d.objid = t.oid
+        AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
+      WHERE n.nspname = $1
+     UNION
+     SELECT p.proname FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       JOIN pg_depend d ON d.classid = 'pg_proc'::regclass AND d.objid = p.oid
+        AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
+      WHERE n.nspname = $1
+     UNION
+     SELECT oc.opcname FROM pg_opclass oc
+       JOIN pg_namespace n ON n.oid = oc.opcnamespace
+       JOIN pg_depend d ON d.classid = 'pg_opclass'::regclass AND d.objid = oc.oid
+        AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
+      WHERE n.nspname = $1`,
+    [schema]
+  );
+  return new Set(rows.map((r) => r.objname));
+}
+
+// Builds a rewriter that replaces "srcSchema." prefixes with "dstSchema." in SQL,
+// EXCEPT when the qualified name is an extension-owned object that must keep
+// resolving against the source schema (where the extension actually lives).
+function makeSchemaRewriter(
+  srcSchema: string,
+  dstSchema: string,
+  preserveNames: ReadonlySet<string>
+): (sql: string) => string {
+  const pattern = new RegExp(`\\b${srcSchema}\\.("[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)`, "g");
+  return (sql: string) =>
+    sql.replace(pattern, (match, ident: string) => {
+      const name = ident.startsWith('"') ? ident.slice(1, -1) : ident;
+      return preserveNames.has(name) ? match : `${dstSchema}.${ident}`;
+    });
+}
+
+// Copies user-created enum types (not extension-owned) into the destination
+// schema so table columns and functions can reference them there.
+async function copyEnumTypes(
+  client: PoolClient,
+  srcSchema: string,
+  dstSchema: string
+): Promise<Set<string>> {
+  const { rows } = await client.query<{ typname: string; labels: string[] }>(
+    `SELECT t.typname, array_agg(e.enumlabel ORDER BY e.enumsortorder) AS labels
+     FROM pg_type t
+     JOIN pg_enum e ON e.enumtypid = t.oid
+     JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE n.nspname = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_depend d
+         WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid
+           AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
+       )
+     GROUP BY t.typname`,
+    [srcSchema]
+  );
+  const copied = new Set<string>();
+  for (const r of rows) {
+    const labels = r.labels.map((l) => `'${l.replace(/'/g, "''")}'`).join(", ");
+    try {
+      await client.query(`CREATE TYPE "${dstSchema}"."${r.typname}" AS ENUM (${labels})`);
+    } catch { /* already exists */ }
+    copied.add(r.typname);
+  }
+  return copied;
+}
+
 // Returns table names in topological order (parents before children via FK deps).
 // Tables with no FKs come first. Circular refs are appended at the end.
 async function topoSort(client: PoolClient, schema: string, tables: string[]): Promise<string[]> {
@@ -139,6 +216,9 @@ export async function copyTableSchemas(
   dstSchema: string
 ): Promise<CopyTableSchemaResult> {
   await copySequences(client, srcSchema, dstSchema);
+  const copiedEnums = await copyEnumTypes(client, srcSchema, dstSchema);
+  const extensionNames = await getExtensionOwnedNames(client, srcSchema);
+  const rewrite = makeSchemaRewriter(srcSchema, dstSchema, extensionNames);
 
   const { rows: allTables } = await client.query<{ table_name: string }>(
     `SELECT table_name FROM information_schema.tables
@@ -167,12 +247,13 @@ export async function copyTableSchemas(
         is_nullable: string;
         column_default: string | null;
         udt_name: string;
+        udt_schema: string;
         is_identity: string;
         identity_generation: string | null;
       }>(
         `SELECT column_name, data_type, character_maximum_length,
                 numeric_precision, numeric_scale, is_nullable,
-                column_default, udt_name, is_identity, identity_generation
+                column_default, udt_name, udt_schema, is_identity, identity_generation
          FROM information_schema.columns
          WHERE table_schema = $1 AND table_name = $2
          ORDER BY ordinal_position`,
@@ -189,7 +270,18 @@ export async function copyTableSchemas(
               ? `numeric(${c.numeric_precision},${c.numeric_scale ?? 0})`
               : "numeric";
         } else if (c.data_type === "ARRAY" || c.data_type === "USER-DEFINED") {
-          typeDef = c.udt_name.startsWith("_") ? `${c.udt_name.slice(1)}[]` : c.udt_name;
+          const isArray = c.udt_name.startsWith("_");
+          const baseName = isArray ? c.udt_name.slice(1) : c.udt_name;
+          const suffix = isArray ? "[]" : "";
+          // Resolve the type to the schema where it will actually exist:
+          //  • enums we copied into the destination schema → destination schema
+          //  • extension-owned types (e.g. pgvector's "vector") and anything else
+          //    living in the source schema → keep source schema (extensions are
+          //    database-wide and cannot be reinstalled per schema)
+          //  • pg_catalog builtins → bare name
+          let ns = c.udt_schema;
+          if (ns === srcSchema && copiedEnums.has(baseName)) ns = dstSchema;
+          typeDef = ns === "pg_catalog" ? `${baseName}${suffix}` : `"${ns}"."${baseName}"${suffix}`;
         } else {
           typeDef = c.data_type;
         }
@@ -202,13 +294,9 @@ export async function copyTableSchemas(
           return `"${c.column_name}" ${typeDef}${nullable} GENERATED ${gen} AS IDENTITY`;
         }
 
-        // nextval() default — rewrite schema prefix so it points to dst sequences
-        const def = c.column_default
-          ? ` DEFAULT ${c.column_default.replace(
-              new RegExp(`(^|[^a-z0-9_])${srcSchema}\\.`, "g"),
-              `$1${dstSchema}.`
-            )}`
-          : "";
+        // nextval() default — rewrite schema prefix so it points to dst sequences,
+        // but preserve references to extension-owned objects (casts, functions)
+        const def = c.column_default ? ` DEFAULT ${rewrite(c.column_default)}` : "";
         return `"${c.column_name}" ${typeDef}${nullable}${def}`;
       });
 
@@ -318,13 +406,27 @@ export async function copyFunctions(
   srcSchema: string,
   dstSchema: string
 ): Promise<{ copied: number; failed: Array<{ name: string; error: string }> }> {
+  // Only plain functions and procedures — aggregates ('a') and window functions
+  // ('w') can't be dumped via pg_get_functiondef. Extension-owned functions
+  // (e.g. pgvector's vector_in/avg/sum) must not be copied: they belong to the
+  // extension living in the source schema, and copying I/O functions creates
+  // broken shell types in the destination schema.
   const { rows } = await client.query<{ proname: string; oid: number }>(
     `SELECT p.proname, p.oid
      FROM pg_proc p
      JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = $1`,
+     WHERE n.nspname = $1
+       AND p.prokind IN ('f', 'p')
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_depend d
+         WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid
+           AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
+       )`,
     [srcSchema]
   );
+
+  const extensionNames = await getExtensionOwnedNames(client, srcSchema);
+  const rewrite = makeSchemaRewriter(srcSchema, dstSchema, extensionNames);
 
   let copied = 0;
   const failed: Array<{ name: string; error: string }> = [];
@@ -336,10 +438,7 @@ export async function copyFunctions(
         [oid]
       );
       if (defs.length === 0) continue;
-      const rewritten = defs[0].def.replace(
-        new RegExp(`\\b${srcSchema}\\.`, "g"),
-        `${dstSchema}.`
-      );
+      const rewritten = rewrite(defs[0].def);
       // Wrap in a transaction so SET LOCAL search_path takes effect only for
       // this CREATE OR REPLACE FUNCTION. plpgsql resolves unqualified type refs
       // in DECLARE sections at parse time using the session's current search_path,
@@ -403,6 +502,9 @@ export async function copyTriggers(
     grouped.get(key)!.events.push(row.event_manipulation);
   }
 
+  const extensionNames = await getExtensionOwnedNames(client, srcSchema);
+  const rewrite = makeSchemaRewriter(srcSchema, dstSchema, extensionNames);
+
   let copied = 0;
   const failed: Array<{ name: string; error: string }> = [];
 
@@ -411,10 +513,7 @@ export async function copyTriggers(
     try {
       const events = trig.events.join(" OR ");
       const forEach = trig.orientation === "ROW" ? "FOR EACH ROW" : "FOR EACH STATEMENT";
-      const statement = trig.statement.replace(
-        new RegExp(`\\b${srcSchema}\\.`, "g"),
-        `${dstSchema}.`
-      );
+      const statement = rewrite(trig.statement);
       await client.query(
         `CREATE OR REPLACE TRIGGER "${triggerName}"
          ${trig.timing} ${events}
@@ -452,6 +551,8 @@ export async function copyRlsPolicies(
     } catch { /* table may not exist — skip */ }
   }
 
+  // roles is name[] (OID 1003) which node-postgres does NOT parse into a JS
+  // array — cast to text[] so it arrives as string[].
   const { rows: policies } = await client.query<{
     policyname: string;
     tablename: string;
@@ -461,10 +562,13 @@ export async function copyRlsPolicies(
     qual: string | null;
     with_check: string | null;
   }>(
-    `SELECT policyname, tablename, cmd, permissive, roles, qual, with_check
+    `SELECT policyname, tablename, cmd, permissive, roles::text[] AS roles, qual, with_check
      FROM pg_policies WHERE schemaname = $1`,
     [srcSchema]
   );
+
+  const extensionNames = await getExtensionOwnedNames(client, srcSchema);
+  const rewrite = makeSchemaRewriter(srcSchema, dstSchema, extensionNames);
 
   let copied = 0;
   const failed: Array<{ name: string; error: string }> = [];
@@ -472,9 +576,11 @@ export async function copyRlsPolicies(
   for (const p of policies) {
     try {
       const permissive = p.permissive === "PERMISSIVE" ? "PERMISSIVE" : "RESTRICTIVE";
-      const roles = p.roles?.length ? `TO ${p.roles.join(", ")}` : "";
-      const using = p.qual ? `USING (${p.qual})` : "";
-      const withCheck = p.with_check ? `WITH CHECK (${p.with_check})` : "";
+      const roles = p.roles?.length
+        ? `TO ${p.roles.map((r) => (r === "public" ? "public" : `"${r}"`)).join(", ")}`
+        : "";
+      const using = p.qual ? `USING (${rewrite(p.qual)})` : "";
+      const withCheck = p.with_check ? `WITH CHECK (${rewrite(p.with_check)})` : "";
       await client.query(
         `CREATE POLICY "${p.policyname}"
          ON "${dstSchema}"."${p.tablename}"
