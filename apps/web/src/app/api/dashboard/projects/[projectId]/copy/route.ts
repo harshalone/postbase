@@ -34,6 +34,7 @@ const bodySchema = z.object({
   organisationId: z.string().uuid().optional().nullable(),
   options: z.object({
     tables: z.boolean().default(true),
+    tableData: z.boolean().default(true),
     functions: z.boolean().default(true),
     triggers: z.boolean().default(true),
     rls: z.boolean().default(true),
@@ -346,7 +347,7 @@ export async function POST(
         }
 
         // ── 12. Data — table by table ─────────────────────────────────────────
-        if (options.tables) {
+        if (options.tables && options.tableData) {
           phase("data", "running", "Starting data copy…");
           const client = await pool.connect();
           let dataErrors = 0;
@@ -381,6 +382,8 @@ export async function POST(
           } finally {
             client.release();
           }
+        } else {
+          phase("data", "skipped", "Table data skipped");
         }
 
         // ── Summary ───────────────────────────────────────────────────────────

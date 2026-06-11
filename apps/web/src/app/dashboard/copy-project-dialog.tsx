@@ -226,6 +226,7 @@ export function CopyProjectDialog({
   const [orgs, setOrgs] = useState<Organisation[]>([]);
   const [options, setOptions] = useState({
     tables: true,
+    tableData: true,
     functions: true,
     triggers: true,
     rls: true,
@@ -437,7 +438,8 @@ export function CopyProjectDialog({
               <p className="text-xs text-zinc-400 mb-2.5">What to copy</p>
               <div className="space-y-2.5">
                 {[
-                  { key: "tables", label: "Tables (schema + data)" },
+                  { key: "tables", label: "Tables (schema)" },
+                  { key: "tableData", label: "Table data" },
                   { key: "functions", label: "Functions" },
                   { key: "triggers", label: "Triggers" },
                   { key: "rls", label: "RLS policies" },
@@ -457,6 +459,8 @@ export function CopyProjectDialog({
                           const next = { ...prev, [key]: checked };
                           if (key === "functions" && !checked) next.triggers = false;
                           if (key === "triggers" && checked) next.functions = true;
+                          if (key === "tables" && !checked) next.tableData = false;
+                          if (key === "tableData" && checked) next.tables = true;
                           return next;
                         });
                       }}
