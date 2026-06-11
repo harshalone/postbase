@@ -411,8 +411,9 @@ export async function copyFunctions(
   // (e.g. pgvector's vector_in/avg/sum) must not be copied: they belong to the
   // extension living in the source schema, and copying I/O functions creates
   // broken shell types in the destination schema.
-  const { rows } = await client.query<{ proname: string; oid: number }>(
-    `SELECT p.proname, p.oid
+  const { rows } = await client.query<{ proname: string; oid: number; identity_args: string }>(
+    `SELECT p.proname, p.oid,
+            pg_get_function_identity_arguments(p.oid) AS identity_args
      FROM pg_proc p
      JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = $1
@@ -428,10 +429,21 @@ export async function copyFunctions(
   const extensionNames = await getExtensionOwnedNames(client, srcSchema);
   const rewrite = makeSchemaRewriter(srcSchema, dstSchema, extensionNames);
 
+  // When extension objects (e.g. pgvector) live in the source schema, function
+  // bodies may use the extension's operators (<=>, <->, …) unqualified. Operators
+  // are only resolvable via search_path, so the source schema must stay on the
+  // path — both while creating the function AND when it later runs (the runtime
+  // path is just "<project schema>, public"). We include the source schema at
+  // DDL time and pin it on each function with ALTER ROUTINE … SET search_path.
+  const hasExtensionObjects = extensionNames.size > 0;
+  const ddlSearchPath = hasExtensionObjects
+    ? `"${dstSchema}", "${srcSchema}", public`
+    : `"${dstSchema}", public`;
+
   let copied = 0;
   const failed: Array<{ name: string; error: string }> = [];
 
-  for (const { proname, oid } of rows) {
+  for (const { proname, oid, identity_args } of rows) {
     try {
       const { rows: defs } = await client.query<{ def: string }>(
         `SELECT pg_get_functiondef($1) AS def`,
@@ -445,8 +457,17 @@ export async function copyFunctions(
       // so the destination schema must be first in search_path during DDL execution.
       await client.query("BEGIN");
       try {
-        await client.query(`SET LOCAL search_path = "${dstSchema}", public`);
+        await client.query(`SET LOCAL search_path = ${ddlSearchPath}`);
         await client.query(rewritten);
+        if (hasExtensionObjects) {
+          // Pin the search_path on the routine itself so unqualified extension
+          // operators keep resolving when the function runs under the project's
+          // normal runtime path (which never includes the source schema).
+          await client.query(
+            `ALTER ROUTINE "${dstSchema}"."${proname}"(${rewrite(identity_args)})
+             SET search_path = ${ddlSearchPath}`
+          );
+        }
         await client.query("COMMIT");
       } catch (innerErr) {
         await client.query("ROLLBACK");
