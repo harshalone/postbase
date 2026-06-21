@@ -29,6 +29,19 @@ export async function register() {
 
   // Only start the scheduler in the Node.js runtime (not edge), and only once.
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Safety net: a transient DB/network blip (e.g. Railway Postgres restarting
+    // and `postgres.railway.internal` failing to resolve) can surface as an
+    // unhandled rejection or uncaught exception from `pg`. Without these
+    // handlers Node exits the process, which makes Railway's /api/health probe
+    // see "service unavailable" and loop. Log and stay up instead — the next
+    // query reconnects once the DB is back.
+    process.on("unhandledRejection", (reason) => {
+      console.error("[process] unhandledRejection (non-fatal):", reason);
+    });
+    process.on("uncaughtException", (err) => {
+      console.error("[process] uncaughtException (non-fatal):", err);
+    });
+
     const { loadAllJobs } = await import("@/lib/scheduler");
     await loadAllJobs();
   }
