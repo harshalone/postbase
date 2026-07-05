@@ -24,6 +24,7 @@ import { getBaseUrl } from "@/lib/get-base-url";
 import { signJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 import { nanoid } from "nanoid";
+import { PROVIDER_AUTH_URLS } from "../../authorize/route";
 
 // Provider token exchange configs
 interface ProviderTokenConfig {
@@ -31,6 +32,9 @@ interface ProviderTokenConfig {
   // userUrl is empty string for providers that embed user info in the id_token
   userUrl: string;
   mapUser: (profile: Record<string, unknown>) => { id: string; email: string; name?: string; image?: string };
+  // Extra headers required by the profile endpoint beyond the standard
+  // `Authorization: Bearer <token>` (e.g. Twitch's Helix API requires Client-Id).
+  extraProfileHeaders?: (clientId: string) => Record<string, string>;
 }
 
 const PROVIDER_CONFIGS: Record<string, ProviderTokenConfig> = {
@@ -95,7 +99,76 @@ const PROVIDER_CONFIGS: Record<string, ProviderTokenConfig> = {
       image: Array.isArray(p.images) && p.images.length > 0 ? String((p.images[0] as Record<string, unknown>).url) : undefined,
     }),
   },
+  // LinkedIn's "Sign In with LinkedIn using OpenID Connect" product exposes
+  // standard OIDC claims (sub, email, name, picture) from the userinfo endpoint.
+  linkedin: {
+    tokenUrl: "https://www.linkedin.com/oauth/v2/accessToken",
+    userUrl: "https://api.linkedin.com/v2/userinfo",
+    mapUser: (p) => ({
+      id: String(p.sub),
+      email: String(p.email ?? ""),
+      name: p.name ? String(p.name) : undefined,
+      image: p.picture ? String(p.picture) : undefined,
+    }),
+  },
+  facebook: {
+    tokenUrl: "https://graph.facebook.com/v19.0/oauth/access_token",
+    userUrl: "https://graph.facebook.com/me?fields=id,name,email,picture",
+    mapUser: (p) => {
+      const picture = p.picture as Record<string, unknown> | undefined;
+      const pictureData = picture?.data as Record<string, unknown> | undefined;
+      return {
+        id: String(p.id),
+        email: String(p.email ?? ""),
+        name: p.name ? String(p.name) : undefined,
+        image: pictureData?.url ? String(pictureData.url) : undefined,
+      };
+    },
+  },
+  // Twitter/X OAuth 2.0 user fields must be requested explicitly via user.fields.
+  twitter: {
+    tokenUrl: "https://api.twitter.com/2/oauth2/token",
+    userUrl: "https://api.twitter.com/2/users/me?user.fields=profile_image_url",
+    mapUser: (p) => {
+      const data = p.data as Record<string, unknown> | undefined;
+      return {
+        id: String(data?.id ?? ""),
+        // Twitter's OAuth2 API does not return email even with an email scope.
+        email: "",
+        name: data?.name ? String(data.name) : undefined,
+        image: data?.profile_image_url ? String(data.profile_image_url) : undefined,
+      };
+    },
+  },
+  // Twitch's Helix API requires a Client-Id header alongside the bearer token,
+  // and does not return email unless the user:read:email scope was granted.
+  twitch: {
+    tokenUrl: "https://id.twitch.tv/oauth2/token",
+    userUrl: "https://api.twitch.tv/helix/users",
+    extraProfileHeaders: (clientId) => ({ "Client-Id": clientId }),
+    mapUser: (p) => {
+      const user = (Array.isArray(p.data) ? p.data[0] : undefined) as Record<string, unknown> | undefined;
+      return {
+        id: String(user?.id ?? ""),
+        email: String(user?.email ?? ""),
+        name: user?.display_name ? String(user.display_name) : undefined,
+        image: user?.profile_image_url ? String(user.profile_image_url) : undefined,
+      };
+    },
+  },
 };
+
+// Guards against the bug class that caused linkedin/facebook/twitter to fail
+// with "unsupported_provider": a provider registered as PKCE-capable in the
+// authorize step (PROVIDER_AUTH_URLS) but never given a token-exchange config
+// here. Every authorize-capable provider must have a matching entry.
+const missingCallbackConfigs = Object.keys(PROVIDER_AUTH_URLS).filter((p) => !PROVIDER_CONFIGS[p]);
+if (missingCallbackConfigs.length > 0) {
+  throw new Error(
+    `PROVIDER_CONFIGS is missing entries for: ${missingCallbackConfigs.join(", ")}. ` +
+    `These providers support PKCE authorize but would fail at callback with "unsupported_provider".`
+  );
+}
 
 /**
  * Build a redirect URL that works for both https:// and custom schemes
@@ -277,7 +350,11 @@ async function handleOAuthCallback(
     profile = JSON.parse(Buffer.from(payloadB64, "base64url").toString()) as Record<string, unknown>;
   } else {
     const userRes = await fetch(config.userUrl, {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        ...config.extraProfileHeaders?.(providerConfig.clientId),
+      },
     });
     if (!userRes.ok) {
       console.log(`[oauth/callback/${provider}] profile fetch failed status=${userRes.status}`);

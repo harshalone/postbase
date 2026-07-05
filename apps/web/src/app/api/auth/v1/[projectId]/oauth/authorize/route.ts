@@ -24,7 +24,7 @@ import { eq } from "drizzle-orm";
 import { getBaseUrl } from "@/lib/get-base-url";
 
 // Map provider names to their OAuth authorization URLs
-const PROVIDER_AUTH_URLS: Record<string, string> = {
+export const PROVIDER_AUTH_URLS: Record<string, string> = {
   apple: "https://appleid.apple.com/auth/authorize",
   github: "https://github.com/login/oauth/authorize",
   google: "https://accounts.google.com/o/oauth2/v2/auth",

@@ -406,6 +406,12 @@ const { data: { user } }    = await postbase.auth.getUser()
 const { data: { session } } = await postbase.auth.getSession()
 // session.accessToken, session.user, session.expiresAt
 
+// getUser() SSR fix (postbasejs 0.5.9): on a createServerClient, getUser()
+// previously ignored the cookieAdapter and always returned { user: null }
+// even with a valid session cookie — getSession() worked but getUser() did
+// not. Upgrade to >= 0.5.9 if Server Components / Route Handlers / middleware
+// see the user as logged out despite getSession() resolving correctly.
+
 // Update profile
 await postbase.auth.updateUser({ name: 'Alice', metadata: { plan: 'pro' } })
 
@@ -431,7 +437,17 @@ await admin.auth.admin.deleteUser(userId)
 
 ### Storage
 
+#### Upload — contentType is now correctly applied (fixed in 0.5.8)
+
+In postbasejs < 0.5.8, `contentType` was silently ignored and `res.json()` was called unconditionally, causing `SyntaxError: Unexpected end of JSON input` on binary uploads. **Upgrade to ≥ 0.5.8.**
+
 ```ts
+// Browser — File/Blob
+const { data, error } = await postbase.storage.from('avatars').upload('user-123.png', file, { contentType: 'image/png' })
+
+// Node.js — Buffer (Next.js API route, etc.)
+const { data, error } = await postbase.storage.from('avatars').upload('user-123.png', imageBuffer, { contentType: 'image/png' })
+
 // Upload
 const { data } = await postbase.storage.from('avatars').upload('user-123.png', file, { contentType: 'image/png' })
 
