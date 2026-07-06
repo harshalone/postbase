@@ -162,8 +162,19 @@ function buildJoinClauses(joins: JoinClause[]): string {
   }).join(" ");
 }
 
+// Quote a column, handling optional table prefix (e.g. "orders.id" → "orders"."id")
+function quoteCol(c: string): string {
+  if (c === "*") return "*";
+  const parts = c.split(".");
+  if (parts.length === 2) {
+    if (parts[1] === "*") return `"${sanitizeIdentifier(parts[0])}".*`;
+    return `"${sanitizeIdentifier(parts[0])}"."${sanitizeIdentifier(parts[1])}"`;
+  }
+  return `"${sanitizeIdentifier(c)}"`;
+}
+
 function buildFilterClause(filter: Filter, values: unknown[]): string {
-  const col = `"${sanitizeIdentifier(filter.column)}"`;
+  const col = quoteCol(filter.column);
 
   switch (filter.operator) {
     case "in": {
@@ -332,17 +343,6 @@ export async function POST(req: NextRequest) {
       case "select": {
         const joins = input.joins ?? [];
         const joinSql = joins.length ? " " + buildJoinClauses(joins) : "";
-
-        // Quote a column, handling optional table prefix (e.g. "orders.id" → "orders"."id")
-        function quoteCol(c: string): string {
-          if (c === "*") return "*";
-          const parts = c.split(".");
-          if (parts.length === 2) {
-            if (parts[1] === "*") return `"${sanitizeIdentifier(parts[0])}".*`;
-            return `"${sanitizeIdentifier(parts[0])}"."${sanitizeIdentifier(parts[1])}"`;
-          }
-          return `"${sanitizeIdentifier(c)}"`;
-        }
 
         if (input.head) {
           const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
