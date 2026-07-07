@@ -54,7 +54,13 @@ import { emailSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { validateApiKey } from "@/lib/auth/keys";
 import { createTransport } from "nodemailer";
-import type SMTPTransport from "nodemailer/lib/smtp-transport";
+import {
+  isSmtpConfigured,
+  isSesIamConfigured,
+  isSesSmtpConfigured,
+  buildTransportConfig,
+  resolveFrom,
+} from "@/lib/email/ses";
 
 const bodySchema = z.object({
   to: z.string().email(),
@@ -91,45 +97,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     .where(eq(emailSettings.projectId, keyInfo.projectId))
     .limit(1);
 
-  const isSmtpConfigured = settings?.provider === "smtp" && settings.smtpHost;
-  const isSesIamConfigured = settings?.provider === "ses" && settings.sesAccessKeyId && settings.sesSecretAccessKey;
-  const isSesSmtpConfigured = settings?.provider === "ses" && settings.sesSmtpUsername && settings.sesSmtpPassword;
-  const emailConfigured = isSmtpConfigured || isSesIamConfigured || isSesSmtpConfigured;
+  const emailConfigured =
+    isSmtpConfigured(settings) || isSesIamConfigured(settings) || isSesSmtpConfigured(settings);
 
   if (!emailConfigured) {
     return Response.json({ error: "Email not configured for this project" }, { status: 500 });
   }
 
-  let transportConfig: SMTPTransport.Options;
-
-  if (isSesSmtpConfigured) {
-    const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
-    transportConfig = {
-      host: sesSmtpHost, port: 587, secure: false,
-      auth: { user: settings.sesSmtpUsername!, pass: settings.sesSmtpPassword! },
-    };
-  } else if (isSesIamConfigured) {
-    const sesSmtpHost = `email-smtp.${settings.sesRegion ?? "us-east-1"}.amazonaws.com`;
-    transportConfig = {
-      host: sesSmtpHost, port: 587, secure: false,
-      auth: { user: settings.sesAccessKeyId!, pass: settings.sesSecretAccessKey! },
-    };
-  } else {
-    transportConfig = {
-      host: settings.smtpHost!,
-      port: settings.smtpPort ?? 587,
-      secure: settings.smtpSecure ?? true,
-      auth: settings.smtpUser
-        ? { user: settings.smtpUser, pass: settings.smtpPassword ?? "" }
-        : undefined,
-    };
-  }
+  const transportConfig = buildTransportConfig(settings);
 
   try {
     const transporter = createTransport(transportConfig);
-    const fromEmail = settings.sesFrom ?? settings.smtpFrom ?? settings.smtpUser ?? undefined;
-    const fromName = settings.sesFromName ?? settings.smtpFromName ?? undefined;
-    const from = fromEmail && fromName ? `"${fromName}" <${fromEmail}>` : fromEmail;
+    const from = resolveFrom(settings);
 
     await transporter.sendMail({ from, to, subject, text, html });
 

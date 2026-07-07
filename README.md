@@ -69,6 +69,7 @@ Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 - **Table Explorer** — Inline cell editing, column filtering, full-text row search, and CSV import directly from the dashboard
 - **RLS Policies** — Row Level Security policy editor with live preview
 - **File Storage** — S3-compatible object storage with bucket policies
+- **Transactional Email** — Send email via SMTP or AWS SES (IAM keys or SMTP credentials), configured per-project from the dashboard
 - **Cron Jobs** — SQL or HTTP jobs on any schedule; full run history with request/response detail panel, date filter, and bulk delete
 - **Multi-project** — One Postbase instance can serve multiple apps
 - **Self-hosted** — Single `docker compose up` and you're running
@@ -334,6 +335,20 @@ const { data: files } = await postbase.storage.from('avatars').list('user-123/')
 
 // Delete
 await postbase.storage.from('avatars').remove(['user-123/avatar.png'])
+```
+
+### Email
+
+Send transactional email through the project's configured provider (SMTP or AWS SES) — configure it from the dashboard's **Auth → Email** settings.
+
+```ts
+const { data, error } = await postbase.email.send({
+  to: 'user@example.com',
+  subject: 'Welcome!',
+  text: 'Hello there',
+  html: '<p>Hello there</p>',
+})
+// data.ok
 ```
 
 ---
