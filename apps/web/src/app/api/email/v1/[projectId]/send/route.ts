@@ -37,6 +37,10 @@
  *               html:
  *                 type: string
  *                 description: HTML body (at least one of text or html is required)
+ *               replyTo:
+ *                 type: string
+ *                 format: email
+ *                 description: Reply-To email address
  *     responses:
  *       200:
  *         description: Email sent successfully
@@ -67,6 +71,7 @@ const bodySchema = z.object({
   subject: z.string().min(1),
   text: z.string().optional(),
   html: z.string().optional(),
+  replyTo: z.string().email().optional(),
 }).refine((data) => data.text || data.html, {
   message: "At least one of 'text' or 'html' is required",
 });
@@ -89,7 +94,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { to, subject, text, html } = parsed.data;
+  const { to, subject, text, html, replyTo } = parsed.data;
 
   const [settings] = await db
     .select()
@@ -110,7 +115,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     const transporter = createTransport(transportConfig);
     const from = resolveFrom(settings);
 
-    await transporter.sendMail({ from, to, subject, text, html });
+    await transporter.sendMail({ from, to, subject, text, html, replyTo });
 
     return Response.json({ ok: true });
   } catch (err) {

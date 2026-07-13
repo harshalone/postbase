@@ -498,6 +498,8 @@ const { data, error } = await postbase.email.send({
 // data.ok
 ```
 
+> **Server ≥ 0.3.6 required for SES IAM-key auth.** Earlier postbase server versions sent the raw IAM secret access key as the SES SMTP password instead of deriving the SigV4-based SMTP password, causing `535 Authentication Credentials Invalid` for projects configured with `ses_access_key_id`/`ses_secret_access_key`. Upgrade the server if you hit this error.
+
 ### SSR (Next.js App Router)
 
 ```ts
@@ -532,6 +534,8 @@ await postbase.auth.getSession()
 import { createBrowserClient } from 'postbasejs/ssr'
 const postbase = createBrowserClient(url, anonKey, { projectId })
 ```
+
+> **v0.5.13 fix:** `auth.setSession()` on a server client used to set the session cookie's `Secure` flag based on the Postbase API's URL scheme (`https://...`) rather than the app's own origin. That breaks whenever the API is HTTPS but the app runs on `http://localhost` in dev — Chrome accepts a `Secure` cookie on localhost, Safari silently drops it, so the session never persists and users loop back to the login page after OTP/OAuth. Fixed by deriving `Secure` from `NODE_ENV === 'production'`. Upgrade to ≥ 0.5.13 if you see Safari-only login loops.
 
 ### Environment Variables
 
