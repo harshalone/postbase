@@ -9,6 +9,60 @@ async function getProject(projectId: string) {
   return project ?? null;
 }
 
+const FILTER_OPERATORS = [
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "like",
+  "ilike",
+  "is_null",
+  "is_not_null",
+] as const;
+type FilterOperator = (typeof FILTER_OPERATORS)[number];
+
+function isFilterOperator(value: string): value is FilterOperator {
+  return (FILTER_OPERATORS as readonly string[]).includes(value);
+}
+
+// Build a WHERE clause fragment for a single column/operator/value filter.
+// Column name is validated against the real column list before use, so it's safe to interpolate.
+function buildColumnFilterClause(
+  quotedCol: string,
+  operator: FilterOperator,
+  value: string,
+  queryValues: unknown[]
+): string {
+  switch (operator) {
+    case "is_null":
+      return `${quotedCol} IS NULL`;
+    case "is_not_null":
+      return `${quotedCol} IS NOT NULL`;
+    case "like":
+      queryValues.push(`%${value}%`);
+      return `${quotedCol}::text LIKE $${queryValues.length}`;
+    case "ilike":
+      queryValues.push(`%${value}%`);
+      return `${quotedCol}::text ILIKE $${queryValues.length}`;
+    case "eq":
+      queryValues.push(value);
+      return `${quotedCol}::text = $${queryValues.length}`;
+    case "neq":
+      queryValues.push(value);
+      return `${quotedCol}::text != $${queryValues.length}`;
+    case "gt":
+    case "gte":
+    case "lt":
+    case "lte": {
+      const opMap: Record<string, string> = { gt: ">", gte: ">=", lt: "<", lte: "<=" };
+      queryValues.push(value);
+      return `${quotedCol} ${opMap[operator]} $${queryValues.length}`;
+    }
+  }
+}
+
 // GET /api/dashboard/[projectId]/tables/[tableName]?page=0&limit=50
 export async function GET(
   req: NextRequest,
@@ -24,23 +78,36 @@ export async function GET(
   const sortCol = url.searchParams.get("sortCol");
   const sortDir = url.searchParams.get("sortDir") === "desc" ? "DESC" : "ASC";
   const search = url.searchParams.get("search")?.trim() ?? "";
+  const filterColumn = url.searchParams.get("filterColumn")?.trim() ?? "";
+  const filterOperatorParam = url.searchParams.get("filterOperator")?.trim() ?? "";
+  const filterValue = url.searchParams.get("filterValue") ?? "";
 
   const pool = getProjectPool(project.databaseUrl);
   const client = await pool.connect();
   try {
     const schema = await ensureProjectSchema(client, projectId);
 
-    // Build WHERE clause for search: cast every column to text and ILIKE-match
+    // Fetch column names for this table (used for search-all and to validate filterColumn)
+    const { rows: cols } = await client.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = $1 AND table_name = $2
+       ORDER BY ordinal_position`,
+      [schema, tableName]
+    );
+
     let whereClause = "";
     const queryValues: unknown[] = [];
-    if (search) {
-      // Fetch column names for this table
-      const { rows: cols } = await client.query<{ column_name: string }>(
-        `SELECT column_name FROM information_schema.columns
-         WHERE table_schema = $1 AND table_name = $2
-         ORDER BY ordinal_position`,
-        [schema, tableName]
-      );
+
+    if (filterColumn && filterOperatorParam && isFilterOperator(filterOperatorParam)) {
+      const col = cols.find((c) => c.column_name === filterColumn);
+      if (!col) return NextResponse.json({ error: "Unknown column" }, { status: 400 });
+      const requiresValue = filterOperatorParam !== "is_null" && filterOperatorParam !== "is_not_null";
+      if (!requiresValue || filterValue !== "") {
+        const clause = buildColumnFilterClause(`"${col.column_name}"`, filterOperatorParam, filterValue, queryValues);
+        whereClause = ` WHERE ${clause}`;
+      }
+    } else if (search) {
+      // Build WHERE clause for search: cast every column to text and ILIKE-match
       if (cols.length > 0) {
         const conditions = cols.map((c) => `"${c.column_name}"::text ILIKE $1`).join(" OR ");
         whereClause = ` WHERE (${conditions})`;

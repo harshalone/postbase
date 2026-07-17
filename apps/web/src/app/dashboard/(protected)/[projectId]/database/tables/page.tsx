@@ -49,6 +49,21 @@ type Column = {
   is_primary_key?: boolean;
 };
 
+type FilterOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "like" | "ilike" | "is_null" | "is_not_null";
+
+const FILTER_OPERATOR_OPTIONS: { value: FilterOperator; label: string }[] = [
+  { value: "eq", label: "equals" },
+  { value: "neq", label: "not equals" },
+  { value: "ilike", label: "contains" },
+  { value: "like", label: "contains (case-sensitive)" },
+  { value: "gt", label: "greater than" },
+  { value: "gte", label: "greater than or equal" },
+  { value: "lt", label: "less than" },
+  { value: "lte", label: "less than or equal" },
+  { value: "is_null", label: "is null" },
+  { value: "is_not_null", label: "is not null" },
+];
+
 type TableMeta = {
   table_name: string;
   row_estimate: string;
@@ -361,7 +376,9 @@ export default function DatabasePage({
   const cellContextMenuRef = useRef<HTMLDivElement>(null);
 
   // Filter / search state
-  const [filterText, setFilterText] = useState("");
+  const [filterColumn, setFilterColumn] = useState<string | null>(null);
+  const [filterOperator, setFilterOperator] = useState<FilterOperator>("ilike");
+  const [filterValue, setFilterValue] = useState("");
   const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sort state
@@ -567,15 +584,29 @@ export default function DatabasePage({
   }, [projectId]);
 
   const fetchTableRows = useCallback(
-    async (tableName: string, offset = 0, col?: string | null, dir?: "asc" | "desc", search?: string) => {
+    async (
+      tableName: string,
+      offset = 0,
+      col?: string | null,
+      dir?: "asc" | "desc",
+      filter?: { column: string | null; operator: FilterOperator; value: string }
+    ) => {
       setTableLoading(true);
       try {
         const resolvedCol = col !== undefined ? col : sortCol;
         const resolvedDir = dir !== undefined ? dir : sortDir;
+        const resolvedFilter = filter !== undefined ? filter : { column: filterColumn, operator: filterOperator, value: filterValue };
         const sortParam = resolvedCol ? `&sortCol=${encodeURIComponent(resolvedCol)}&sortDir=${resolvedDir}` : "";
-        const searchParam = search !== undefined && search !== "" ? `&search=${encodeURIComponent(search)}` : "";
+        const needsValue = resolvedFilter.operator !== "is_null" && resolvedFilter.operator !== "is_not_null";
+        let filterParam = "";
+        if (resolvedFilter.column && (!needsValue || resolvedFilter.value !== "")) {
+          filterParam = `&filterColumn=${encodeURIComponent(resolvedFilter.column)}&filterOperator=${resolvedFilter.operator}&filterValue=${encodeURIComponent(resolvedFilter.value)}`;
+        } else if (!resolvedFilter.column && resolvedFilter.value !== "") {
+          // No specific column selected: search across all columns
+          filterParam = `&search=${encodeURIComponent(resolvedFilter.value)}`;
+        }
         const res = await fetch(
-          `/api/dashboard/${projectId}/tables/${tableName}?limit=${TABLE_LIMIT}&offset=${offset}${sortParam}${searchParam}`
+          `/api/dashboard/${projectId}/tables/${tableName}?limit=${TABLE_LIMIT}&offset=${offset}${sortParam}${filterParam}`
         );
         const data = await res.json();
         setTableRows(data.rows ?? []);
@@ -585,7 +616,7 @@ export default function DatabasePage({
         setTableLoading(false);
       }
     },
-    [projectId, sortCol, sortDir]
+    [projectId, sortCol, sortDir, filterColumn, filterOperator, filterValue]
   );
 
   const fetchHistory = useCallback(async () => {
@@ -637,14 +668,16 @@ export default function DatabasePage({
     setSelectedRows(new Set());
     setSortCol(null);
     setSortDir("asc");
-    setFilterText("");
+    setFilterColumn(null);
+    setFilterOperator("ilike");
+    setFilterValue("");
     try {
       const stored = localStorage.getItem(`frozen:${projectId}:${name}`);
       setFrozenOrder(stored ? (JSON.parse(stored) as string[]) : []);
     } catch {
       setFrozenOrder([]);
     }
-    fetchTableRows(name, 0, null, "asc", "");
+    fetchTableRows(name, 0, null, "asc", { column: null, operator: "ilike", value: "" });
   }
 
   function handleSort(colName: string) {
@@ -652,7 +685,7 @@ export default function DatabasePage({
     const newDir = sortCol === colName && sortDir === "asc" ? "desc" : "asc";
     setSortCol(colName);
     setSortDir(newDir);
-    fetchTableRows(selectedTable, 0, colName, newDir, filterText);
+    fetchTableRows(selectedTable, 0, colName, newDir);
     setColMenu(null);
   }
 
@@ -660,7 +693,7 @@ export default function DatabasePage({
     if (!selectedTable) return;
     setSortCol(colName);
     setSortDir("asc");
-    fetchTableRows(selectedTable, 0, colName, "asc", filterText);
+    fetchTableRows(selectedTable, 0, colName, "asc");
     setColMenu(null);
   }
 
@@ -668,7 +701,7 @@ export default function DatabasePage({
     if (!selectedTable) return;
     setSortCol(colName);
     setSortDir("desc");
-    fetchTableRows(selectedTable, 0, colName, "desc", filterText);
+    fetchTableRows(selectedTable, 0, colName, "desc");
     setColMenu(null);
   }
 
@@ -1528,7 +1561,7 @@ export default function DatabasePage({
                           <span className="truncate">{t.table_name}</span>
                         </span>
                         <span className="block text-xs text-zinc-600">
-                          ~{Number(t.row_estimate).toLocaleString()} rows
+                          {Number(t.row_estimate).toLocaleString()} rows
                         </span>
                       </button>
                     </li>
@@ -1547,45 +1580,109 @@ export default function DatabasePage({
                 <>
                   {/* Toolbar */}
                   <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0 flex-wrap">
-                    <div className="flex items-center gap-2 flex-1 min-w-48 bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs focus-within:border-zinc-600 transition-colors">
-                      <Search size={12} className="shrink-0 text-zinc-600" />
-                      <input
-                        type="text"
-                        value={filterText}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setFilterText(val);
-                          if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
-                          filterDebounceRef.current = setTimeout(() => {
-                            if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, val);
-                          }, 300);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
-                            if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, filterText);
-                          }
-                          if (e.key === "Escape") {
-                            setFilterText("");
-                            if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
-                            if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, "");
-                          }
-                        }}
-                        placeholder={`Filter by ${selectedTableMeta?.columns.slice(0, 3).map((c) => c.column_name).join(", ")}${(selectedTableMeta?.columns.length ?? 0) > 3 ? "…" : ""}`}
-                        className="flex-1 bg-transparent outline-none text-zinc-200 placeholder-zinc-600 min-w-0"
-                      />
-                      {filterText && (
-                        <button
-                          onClick={() => {
-                            setFilterText("");
-                            if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
-                            if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, "");
+                    <div className="flex items-center flex-1 min-w-[22rem] bg-zinc-900 border border-zinc-800 rounded overflow-hidden text-xs focus-within:border-zinc-600 transition-colors">
+                      {/* Column picker */}
+                      <div className="relative shrink-0 border-r border-zinc-800">
+                        <select
+                          value={filterColumn ?? ""}
+                          onChange={(e) => {
+                            const col = e.target.value || null;
+                            setFilterColumn(col);
+                            if (selectedTable) {
+                              fetchTableRows(selectedTable, 0, undefined, undefined, {
+                                column: col,
+                                operator: filterOperator,
+                                value: filterValue,
+                              });
+                            }
                           }}
-                          className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors"
+                          className="cursor-pointer appearance-none bg-transparent pl-2.5 pr-6 py-1.5 text-zinc-200 focus:outline-none max-w-32 truncate"
                         >
-                          <X size={11} />
-                        </button>
-                      )}
+                          <option value="" className="bg-zinc-900">All columns</option>
+                          {selectedTableMeta?.columns.map((c) => (
+                            <option key={c.column_name} value={c.column_name} className="bg-zinc-900">
+                              {c.column_name}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown size={11} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+                      </div>
+
+                      {/* Operator picker */}
+                      <div className="relative shrink-0 border-r border-zinc-800">
+                        <select
+                          value={filterOperator}
+                          disabled={!filterColumn}
+                          onChange={(e) => {
+                            const op = e.target.value as FilterOperator;
+                            setFilterOperator(op);
+                            if (selectedTable) {
+                              fetchTableRows(selectedTable, 0, undefined, undefined, {
+                                column: filterColumn,
+                                operator: op,
+                                value: filterValue,
+                              });
+                            }
+                          }}
+                          className="cursor-pointer appearance-none bg-transparent pl-2.5 pr-6 py-1.5 text-zinc-200 focus:outline-none max-w-28 truncate disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {FILTER_OPERATOR_OPTIONS.map((op) => (
+                            <option key={op.value} value={op.value} className="bg-zinc-900">
+                              {op.label}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown size={11} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+                      </div>
+
+                      {/* Value input */}
+                      <div className="flex items-center gap-2 flex-1 min-w-24 px-2.5 py-1.5">
+                        <Search size={12} className="shrink-0 text-zinc-600" />
+                        <input
+                          type="text"
+                          value={filterValue}
+                          disabled={filterOperator === "is_null" || filterOperator === "is_not_null"}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setFilterValue(val);
+                            if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+                            filterDebounceRef.current = setTimeout(() => {
+                              if (selectedTable) {
+                                fetchTableRows(selectedTable, 0, undefined, undefined, {
+                                  column: filterColumn,
+                                  operator: filterOperator,
+                                  value: val,
+                                });
+                              }
+                            }, 300);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+                              if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, { column: filterColumn, operator: filterOperator, value: filterValue });
+                            }
+                            if (e.key === "Escape") {
+                              setFilterValue("");
+                              if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+                              if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, { column: filterColumn, operator: filterOperator, value: "" });
+                            }
+                          }}
+                          placeholder={filterColumn ? `Search ${filterColumn}…` : "Search all columns…"}
+                          className="flex-1 bg-transparent outline-none text-zinc-200 placeholder-zinc-600 min-w-0 disabled:opacity-40"
+                        />
+                        {filterValue && (
+                          <button
+                            onClick={() => {
+                              setFilterValue("");
+                              if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+                              if (selectedTable) fetchTableRows(selectedTable, 0, undefined, undefined, { column: filterColumn, operator: filterOperator, value: "" });
+                            }}
+                            className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors"
+                          >
+                            <X size={11} />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Bulk Actions */}
@@ -2014,7 +2111,7 @@ export default function DatabasePage({
                     <div className="flex items-center gap-2 text-xs text-zinc-500">
                       <button
                         disabled={tableOffset === 0}
-                        onClick={() => fetchTableRows(selectedTable, tableOffset - TABLE_LIMIT, undefined, undefined, filterText)}
+                        onClick={() => fetchTableRows(selectedTable, tableOffset - TABLE_LIMIT)}
                         className="cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed p-1 rounded hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
                       >
                         <ChevronLeft size={13} />
@@ -2025,7 +2122,7 @@ export default function DatabasePage({
                       </span>
                       <button
                         disabled={tableOffset + TABLE_LIMIT >= tableTotal}
-                        onClick={() => fetchTableRows(selectedTable, tableOffset + TABLE_LIMIT, undefined, undefined, filterText)}
+                        onClick={() => fetchTableRows(selectedTable, tableOffset + TABLE_LIMIT)}
                         className="cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed p-1 rounded hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
                       >
                         <ChevronRight size={13} />

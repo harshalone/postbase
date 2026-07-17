@@ -28,57 +28,52 @@ export async function GET(
     const schema = await ensureProjectSchema(client, projectId);
     const { rows: tables } = await client.query<{
       table_name: string;
-      row_estimate: string;
       size_bytes: string;
     }>(
       `SELECT
          t.table_name,
-         GREATEST(
-           COALESCE(s.n_live_tup, 0),
-           CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint ELSE 0 END
-         )::text AS row_estimate,
          COALESCE(pg_total_relation_size(
            quote_ident($1) || '.' || quote_ident(t.table_name)
          ), 0)::text AS size_bytes
        FROM information_schema.tables t
-       LEFT JOIN pg_stat_user_tables s
-         ON s.schemaname = $1 AND s.relname = t.table_name
-       LEFT JOIN pg_class c
-         ON c.relname = t.table_name
-         AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = $1)
        WHERE t.table_schema = $1 AND t.table_type = 'BASE TABLE'
        ORDER BY t.table_name`,
       [schema]
     );
 
-    // For each table fetch column definitions + primary key info
+    // For each table fetch exact row count + column definitions + primary key info
     const tablesWithCols = await Promise.all(
       tables.map(async (t) => {
-        const { rows: cols } = await client.query(
-          `SELECT
-             c.column_name,
-             c.data_type,
-             c.udt_name,
-             c.is_nullable,
-             c.column_default,
-             CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END AS is_primary_key
-           FROM information_schema.columns c
-           LEFT JOIN (
-             SELECT kcu.column_name
-             FROM information_schema.table_constraints tc
-             JOIN information_schema.key_column_usage kcu
-               ON tc.constraint_name = kcu.constraint_name
-               AND tc.table_schema = kcu.table_schema
-               AND tc.table_name = kcu.table_name
-             WHERE tc.constraint_type = 'PRIMARY KEY'
-               AND tc.table_schema = $1
-               AND tc.table_name = $2
-           ) pk ON pk.column_name = c.column_name
-           WHERE c.table_schema = $1 AND c.table_name = $2
-           ORDER BY c.ordinal_position`,
-          [schema, t.table_name]
-        );
-        return { ...t, columns: cols };
+        const [{ rows: cols }, { rows: [{ count }] }] = await Promise.all([
+          client.query(
+            `SELECT
+               c.column_name,
+               c.data_type,
+               c.udt_name,
+               c.is_nullable,
+               c.column_default,
+               CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END AS is_primary_key
+             FROM information_schema.columns c
+             LEFT JOIN (
+               SELECT kcu.column_name
+               FROM information_schema.table_constraints tc
+               JOIN information_schema.key_column_usage kcu
+                 ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                 AND tc.table_name = kcu.table_name
+               WHERE tc.constraint_type = 'PRIMARY KEY'
+                 AND tc.table_schema = $1
+                 AND tc.table_name = $2
+             ) pk ON pk.column_name = c.column_name
+             WHERE c.table_schema = $1 AND c.table_name = $2
+             ORDER BY c.ordinal_position`,
+            [schema, t.table_name]
+          ),
+          client.query<{ count: string }>(
+            `SELECT COUNT(*)::text AS count FROM "${schema}"."${t.table_name}"`
+          ),
+        ]);
+        return { ...t, row_estimate: count, columns: cols };
       })
     );
 
