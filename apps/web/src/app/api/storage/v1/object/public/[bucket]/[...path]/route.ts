@@ -25,7 +25,7 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { storageBuckets, storageObjects } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { getStorageClient, getEnvStorageClient } from "@/lib/storage/client";
+import { getStorageClient } from "@/lib/storage/client";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ bucket: string; path: string[] }> }) {
   const { bucket: bucketName, path: pathParts } = await params;
@@ -47,24 +47,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ buc
 
   if (!obj) return Response.json({ error: "Not found" }, { status: 404 });
 
-  const clients = [getStorageClient(bucket.projectId), getEnvStorageClient()];
+  try {
+    const storage = await getStorageClient(bucket.projectId);
+    const { body, contentType } = await storage.getObject(bucket.name, objectPath);
 
-  for (const clientPromise of clients) {
-    try {
-      const storage = await clientPromise;
-      const { body, contentType } = await storage.getObject(bucket.name, objectPath);
-
-      return new Response(body.buffer as ArrayBuffer, {
-        headers: {
-          "Content-Type": contentType,
-          "Content-Length": String(body.byteLength),
-          "Cache-Control": "public, max-age=3600",
-        },
-      });
-    } catch {
-      // try next client
-    }
+    return new Response(body.buffer as ArrayBuffer, {
+      headers: {
+        "Content-Type": contentType,
+        "Content-Length": String(body.byteLength),
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
+  } catch {
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
-
-  return Response.json({ error: "Not found" }, { status: 404 });
 }
