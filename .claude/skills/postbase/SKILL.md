@@ -40,7 +40,7 @@ Body: { "email": "user@example.com" }
 #### Verify Email OTP → session
 ```
 POST /api/auth/v1/{projectId}/email-otp/verify
-Body: { "email": "user@example.com", "code": "123456" }
+Body: { "email": "user@example.com", "code": "123456", "remember_me": false }
 200: { access_token, refresh_token, expires_in, user }
 400: expired/invalid | 404: user not found
 ```
@@ -55,25 +55,34 @@ Body: { "email": "user@example.com", "type": "magic_link" | "otp", "redirectTo":
 #### Verify Magic Link (API)
 ```
 POST /api/auth/v1/{projectId}/verify
-Body: { "email": "user@example.com", "token": "<magic_token>" }
+Body: { "email": "user@example.com", "token": "<magic_token>", "remember_me": false }
 200: { access_token, refresh_token, user }
 ```
+The `GET` version (browser link-click, sets an HttpOnly cookie) also accepts `remember_me=true` as a query
+param, which controls both the DB session TTL and the cookie's `Max-Age`.
 
 #### Sign Up (email + password)
 ```
 POST /api/auth/v1/{projectId}/signup
-Body: { "email": "user@example.com", "password": "...", "data": {} }
+Body: { "email": "user@example.com", "password": "...", "data": {}, "remember_me": false }
 200: { access_token, refresh_token, user } | 422: already registered
 ```
 
 #### Sign In / Refresh Token
 ```
 POST /api/auth/v1/{projectId}/token
-Body (password):      { "grant_type": "password", "email": "...", "password": "..." }
+Body (password):      { "grant_type": "password", "email": "...", "password": "...", "remember_me": false }
 Body (refresh):       { "grant_type": "refresh_token", "refresh_token": "..." }
 200: { access_token, refresh_token, expires_in, user }
 400: invalid creds | 403: banned
 ```
+
+> **`remember_me`** (optional, default `false`, all sign-in/sign-up endpoints above): when `true`, the
+> refresh token TTL is 30 days instead of the default 7. The flag is stored on the session row and
+> automatically carried forward every time the refresh token is rotated via `grant_type: refresh_token`
+> — you never need to resend it on refresh calls. OAuth flows (`oauth/callback`, `oauth/id-token`)
+> don't accept `remember_me` directly since they're redirect/native flows with no request body at the
+> point the session is issued; use `PATCH /session` below to set it afterward for those.
 
 #### Get Session
 ```
@@ -82,6 +91,17 @@ Headers: X-Postbase-Token: <access_token>
          X-Postbase-Session: <refresh_token>   (optional, refreshes if expired)
 200: session object or null
 ```
+
+#### Update Remember-Me State
+```
+PATCH /api/auth/v1/{projectId}/session
+Body: { "refresh_token": "...", "remember_me": true }
+200: { session: { accessToken, refreshToken, expiresAt, user } } | 401: invalid/expired refresh token
+```
+Re-issues the caller's refresh token with the TTL for the new `remember_me` value (30 days if `true`,
+7 if `false`), regardless of how the session was originally created. Use this to toggle "remember me"
+after the fact — e.g. a checkbox shown post-login, or to opt an OAuth session into the longer TTL.
+The old refresh token is invalidated; store the new `refreshToken` from the response.
 
 #### Logout
 ```
@@ -198,9 +218,11 @@ Body: { "args": { "param1": "val1" }, "count": "exact" }
 POST /api/email/v1/{projectId}/send
 Authorization: Bearer <api_key>
 
-Body: { "to": "user@example.com", "subject": "...", "text": "...", "html": "..." }
+Body: { "to": "user@example.com", "subject": "...", "text": "...", "html": "...", "replyTo": "support@example.com" }
 200: sent | 500: provider not configured
 ```
+
+`replyTo` is optional and sets the SMTP Reply-To header (requires postbasejs ≥ 0.5.14).
 
 ---
 
@@ -494,6 +516,7 @@ const { data, error } = await postbase.email.send({
   subject: 'Welcome!',
   text: 'Hello there',
   html: '<p>Hello there</p>',
+  replyTo: 'support@example.com', // optional, requires postbasejs >= 0.5.14
 })
 // data.ok
 ```
@@ -625,11 +648,27 @@ CREATE TABLE "accounts" (
 );
 ```
 
+#### `sessions`
+
+One row per active refresh token. Rotated (not inserted) on every `grant_type: refresh_token` call.
+
+```sql
+CREATE TABLE "sessions" (
+    "id"            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "session_token" text NOT NULL UNIQUE,   -- the refresh token (JWT)
+    "user_id"       uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+    "expires"       timestamp NOT NULL,
+    "remember_me"   boolean NOT NULL DEFAULT false,
+    "created_at"    timestamp NOT NULL DEFAULT now()
+);
+```
+
 **Key facts:**
 - `users.id` is the canonical user UUID used in `current_setting('postbase.user_id', true)` for RLS
 - `email_verified` is `NULL` for email/OTP users until they verify; set immediately for OAuth/Apple
-- These tables live in the project schema — refer to them as just `users` / `accounts` inside trigger functions (after `SET search_path`)
+- These tables live in the project schema — refer to them as just `users` / `accounts` / `sessions` inside trigger functions (after `SET search_path`)
 - **Do NOT query `accounts` from inside a trigger** — the OAuth row may not exist yet when the `users` INSERT trigger fires
+- `sessions.remember_me` controls the refresh token TTL (7 days if `false`, 30 if `true`) and is preserved across rotation — see `remember_me` in the Auth section above
 
 ### Bridging `users` to your app table
 

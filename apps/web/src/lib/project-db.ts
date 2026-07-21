@@ -85,7 +85,7 @@ export async function getProjectById(
 // Bump this version whenever new tables/columns are added to ensureProjectAuthTables.
 // The cache stores the last version each schema was migrated to; if the stored
 // version is lower than SCHEMA_VERSION, migrations are re-run.
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const initialisedSchemas = new Map<string, number>();
 
 export async function ensureProjectAuthTables(
@@ -149,9 +149,15 @@ export async function ensureProjectAuthTables(
         "session_token"  text NOT NULL,
         "user_id"        uuid NOT NULL REFERENCES "${schema}"."users"("id") ON DELETE CASCADE,
         "expires"        timestamp NOT NULL,
+        "remember_me"    boolean DEFAULT false NOT NULL,
         "created_at"     timestamp DEFAULT now() NOT NULL,
         CONSTRAINT "${schema}_sessions_token_unique" UNIQUE ("session_token")
       )
+    `);
+
+    await client.query(`
+      ALTER TABLE "${schema}"."sessions"
+        ADD COLUMN IF NOT EXISTS "remember_me" boolean DEFAULT false NOT NULL
     `);
 
     await client.query(`

@@ -48,7 +48,7 @@ import { NextRequest } from "next/server";
 import { hash } from "bcryptjs";
 import { z } from "zod";
 import { validateApiKey } from "@/lib/auth/keys";
-import { signJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";
+import { signJwt, ACCESS_TOKEN_TTL, getRefreshTokenTTL, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 import { nanoid } from "nanoid";
 
@@ -56,6 +56,7 @@ const bodySchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   data: z.record(z.unknown()).optional(),
+  remember_me: z.boolean().optional(),
 });
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { email, password, data: metadata } = parsed.data;
+  const { email, password, data: metadata, remember_me } = parsed.data;
 
   const schema = getProjectSchema(keyInfo.projectId);
   const pool = getProjectPool();
@@ -104,8 +105,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     );
 
     const secret = getJwtSecret();
+    const rememberMe = !!remember_me;
     const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
-    const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
+    const refreshExpiresAt = Math.floor(Date.now() / 1000) + getRefreshTokenTTL(rememberMe);
 
     const accessToken = await signJwt(
       { sub: user.id, pid: keyInfo.projectId, email: user.email, exp: expiresAt },
@@ -117,10 +119,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     );
 
     await client.query(
-      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires")
-       VALUES ($1, $2, $3)
+      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires", "remember_me")
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT DO NOTHING`,
-      [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
+      [refreshToken, user.id, new Date(refreshExpiresAt * 1000), rememberMe]
     );
 
     const userOut = {

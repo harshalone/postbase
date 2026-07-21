@@ -1,6 +1,6 @@
 {
   "name": "postbase",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "private": true,
   "packageManager": "pnpm@9.0.0",
   "workspaces": [

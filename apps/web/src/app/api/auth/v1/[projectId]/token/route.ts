@@ -53,7 +53,7 @@ import { NextRequest } from "next/server";
 import { compare } from "bcryptjs";
 import { z } from "zod";
 import { validateApiKey } from "@/lib/auth/keys";
-import { signJwt, verifyJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";
+import { signJwt, verifyJwt, ACCESS_TOKEN_TTL, getRefreshTokenTTL, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 import { nanoid } from "nanoid";
 
@@ -61,6 +61,7 @@ const passwordSchema = z.object({
   grant_type: z.literal("password"),
   email: z.string().email(),
   password: z.string(),
+  remember_me: z.boolean().optional(),
 });
 
 const refreshSchema = z.object({
@@ -97,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     await ensureProjectAuthTables(client, schema);
 
     if (parsed.data.grant_type === "password") {
-      const { email, password } = parsed.data;
+      const { email, password, remember_me } = parsed.data;
 
       const { rows: [user] } = await client.query(
         `SELECT * FROM "${schema}"."users" WHERE "email" = $1 LIMIT 1`,
@@ -114,8 +115,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       const valid = await compare(password, user.password_hash);
       if (!valid) return Response.json({ error: "Invalid email or password" }, { status: 400 });
 
+      const rememberMe = !!remember_me;
       const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
-      const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
+      const refreshExpiresAt = Math.floor(Date.now() / 1000) + getRefreshTokenTTL(rememberMe);
 
       const accessToken = await signJwt(
         { sub: user.id, pid: keyInfo.projectId, email: user.email, exp: expiresAt },
@@ -127,10 +129,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       );
 
       await client.query(
-        `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires")
-         VALUES ($1, $2, $3)
+        `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires", "remember_me")
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT DO NOTHING`,
-        [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
+        [refreshToken, user.id, new Date(refreshExpiresAt * 1000), rememberMe]
       );
 
       const userOut = {
@@ -167,8 +169,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     );
     if (!user || user.banned_at) return Response.json({ error: "User not found or banned" }, { status: 401 });
 
+    // Preserve the remember_me state from the token being rotated so a 30-day
+    // session doesn't silently downgrade to 7 days on its first refresh.
+    const rememberMe = !!session.remember_me;
     const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
-    const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
+    const refreshExpiresAt = Math.floor(Date.now() / 1000) + getRefreshTokenTTL(rememberMe);
 
     const accessToken = await signJwt(
       { sub: user.id, pid: keyInfo.projectId, email: user.email, exp: expiresAt },

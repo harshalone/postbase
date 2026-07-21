@@ -73,7 +73,7 @@
  *         description: User not found
  */
 import { NextRequest } from "next/server";
-import { signJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";
+import { signJwt, ACCESS_TOKEN_TTL, getRefreshTokenTTL, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 import { nanoid } from "nanoid";
 
@@ -83,6 +83,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
   const token = searchParams.get("token");
   const email = searchParams.get("email");
   const redirectTo = searchParams.get("redirectTo") ?? "/";
+  const rememberMe = searchParams.get("remember_me") === "true";
 
   if (!token || !email) {
     return Response.json({ error: "Missing token or email" }, { status: 400 });
@@ -122,7 +123,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     );
 
     const secret = getJwtSecret();
-    const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
+    const refreshTokenTtl = getRefreshTokenTTL(rememberMe);
+    const refreshExpiresAt = Math.floor(Date.now() / 1000) + refreshTokenTtl;
 
     const refreshToken = await signJwt(
       { sub: user.id, pid: projectId, email: user.email, exp: refreshExpiresAt, jti: nanoid() },
@@ -130,10 +132,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     );
 
     await client.query(
-      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires")
-       VALUES ($1, $2, $3)
+      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires", "remember_me")
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT DO NOTHING`,
-      [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
+      [refreshToken, user.id, new Date(refreshExpiresAt * 1000), rememberMe]
     );
 
     const response = Response.redirect(new URL(redirectTo, req.url));
@@ -142,7 +144,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
       "HttpOnly",
       "Path=/",
       "SameSite=Lax",
-      `Max-Age=${REFRESH_TOKEN_TTL}`,
+      `Max-Age=${refreshTokenTtl}`,
       ...(process.env.NODE_ENV === "production" ? ["Secure"] : []),
     ].join("; ");
 
@@ -163,8 +165,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { email, token } = body;
-  
+  const { email, token, remember_me } = body;
+
   if (!email || !token) {
     return Response.json({ error: "Missing email or token" }, { status: 400 });
   }
@@ -203,8 +205,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     );
 
     const secret = getJwtSecret();
+    const rememberMe = !!remember_me;
     const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
-    const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
+    const refreshExpiresAt = Math.floor(Date.now() / 1000) + getRefreshTokenTTL(rememberMe);
 
     const accessToken = await signJwt(
       { sub: user.id, pid: projectId, email: user.email, exp: expiresAt },
@@ -216,10 +219,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     );
 
     await client.query(
-      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires")
-       VALUES ($1, $2, $3)
+      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires", "remember_me")
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT DO NOTHING`,
-      [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
+      [refreshToken, user.id, new Date(refreshExpiresAt * 1000), rememberMe]
     );
 
     const userOut = {

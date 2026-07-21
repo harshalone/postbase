@@ -97,8 +97,13 @@ export function decodeJwtUnsafe(token: string): JwtPayload | null {
 }
 
 /** Default token TTLs */
-export const ACCESS_TOKEN_TTL = 60 * 60;          // 1 hour
-export const REFRESH_TOKEN_TTL = 60 * 60 * 24 * 7; // 7 days
+export const ACCESS_TOKEN_TTL = 60 * 60;                      // 1 hour
+export const REFRESH_TOKEN_TTL = 60 * 60 * 24 * 7;             // 7 days (default)
+export const REFRESH_TOKEN_TTL_REMEMBER = 60 * 60 * 24 * 30;   // 30 days (remember me)
+
+export function getRefreshTokenTTL(rememberMe?: boolean): number {
+  return rememberMe ? REFRESH_TOKEN_TTL_REMEMBER : REFRESH_TOKEN_TTL;
+}
 
 export function getJwtSecret(): string {
   const secret = process.env.POSTBASE_JWT_SECRET ?? process.env.NEXTAUTH_SECRET;
