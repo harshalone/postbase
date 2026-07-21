@@ -423,6 +423,22 @@ const { data } = await postbase.auth.verifyOtp({ email, token: '123456' })
 // OAuth (browser redirect)
 await postbase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: '...' } })
 
+// Remember me — 30-day refresh token instead of the default 7-day one
+// (postbasejs >= 0.5.15). Supported on signUp, signInWithPassword, verifyOtp,
+// and verifyEmailOtp. The flag is stored on the sessions row server-side, so
+// it's carried forward automatically on every later refreshSession() call —
+// a 30-day session does not downgrade to 7 days on its first refresh.
+await postbase.auth.signInWithPassword({ email, password, rememberMe: true })
+await postbase.auth.verifyOtp({ email, token: '123456', rememberMe: true })
+
+// OAuth / native id-token flows have no request body at sign-in time, so
+// rememberMe can't be passed there directly. Call setRememberMe afterwards
+// (e.g. right after handleOAuthCallback(), or whenever a user toggles a
+// "remember me" checkbox) — it re-issues the current refresh token with the
+// right TTL and works regardless of how the session was created.
+const { data } = await postbase.auth.setRememberMe(true)
+// data.session.refreshToken is now valid for 30 days
+
 // Session + user
 const { data: { user } }    = await postbase.auth.getUser()
 const { data: { session } } = await postbase.auth.getSession()
