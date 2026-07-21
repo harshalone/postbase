@@ -10,10 +10,12 @@
  * Supported providers: apple, google
  *
  * Body:
- *   provider  - "apple" | "google"
- *   id_token  - JWT issued by the provider
- *   nonce     - (optional) nonce used when requesting the id_token; required
- *               if you passed one to the native SDK to prevent replay attacks
+ *   provider     - "apple" | "google"
+ *   id_token     - JWT issued by the provider
+ *   nonce        - (optional) nonce used when requesting the id_token; required
+ *                  if you passed one to the native SDK to prevent replay attacks
+ *   remember_me  - (optional, default false) issue a 30-day refresh token
+ *                  instead of the default 7-day one
  */
 import { type NextRequest } from "next/server";
 import { z } from "zod";
@@ -23,7 +25,7 @@ import { getEnabledProviders } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { signJwt, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, getJwtSecret } from "@/lib/auth/jwt";
+import { signJwt, ACCESS_TOKEN_TTL, getRefreshTokenTTL, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
 import { nanoid } from "nanoid";
 
@@ -31,6 +33,7 @@ const bodySchema = z.object({
   provider: z.enum(["apple", "google"]),
   id_token: z.string().min(1),
   nonce: z.string().optional(),
+  remember_me: z.boolean().optional(),
 });
 
 // Apple and Google JWKS endpoints for public key verification
@@ -101,7 +104,7 @@ export async function POST(
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { provider, id_token, nonce } = parsed.data;
+  const { provider, id_token, nonce, remember_me } = parsed.data;
 
   // Validate project
   const [project] = await db
@@ -187,8 +190,9 @@ export async function POST(
     );
 
     const secret = getJwtSecret();
+    const rememberMe = !!remember_me;
     const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL;
-    const refreshExpiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL;
+    const refreshExpiresAt = Math.floor(Date.now() / 1000) + getRefreshTokenTTL(rememberMe);
 
     const accessToken = await signJwt(
       { sub: user.id, pid: projectId, email: user.email, exp: expiresAt },
@@ -200,10 +204,10 @@ export async function POST(
     );
 
     await client.query(
-      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires")
-       VALUES ($1, $2, $3)
+      `INSERT INTO "${schema}"."sessions" ("session_token", "user_id", "expires", "remember_me")
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT DO NOTHING`,
-      [refreshToken, user.id, new Date(refreshExpiresAt * 1000)]
+      [refreshToken, user.id, new Date(refreshExpiresAt * 1000), rememberMe]
     );
 
     const userOut = {

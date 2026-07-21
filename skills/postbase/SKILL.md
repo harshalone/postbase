@@ -423,21 +423,61 @@ const { data } = await postbase.auth.verifyOtp({ email, token: '123456' })
 // OAuth (browser redirect)
 await postbase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: '...' } })
 
-// Remember me — 30-day refresh token instead of the default 7-day one
-// (postbasejs >= 0.5.15). Supported on signUp, signInWithPassword, verifyOtp,
-// and verifyEmailOtp. The flag is stored on the sessions row server-side, so
-// it's carried forward automatically on every later refreshSession() call —
-// a 30-day session does not downgrade to 7 days on its first refresh.
+// Remember me — 30-day refresh token instead of the default 7-day one.
+// Supported directly (single call, no follow-up) on signUp,
+// signInWithPassword, verifyOtp, verifyEmailOtp, and signInWithIdToken
+// (postbasejs >= 0.5.16 for signInWithIdToken; >= 0.5.15 for the rest).
+// The flag is stored on the sessions row server-side, so it's carried
+// forward automatically on every later refreshSession() call — a 30-day
+// session does not downgrade to 7 days on its first refresh.
 await postbase.auth.signInWithPassword({ email, password, rememberMe: true })
 await postbase.auth.verifyOtp({ email, token: '123456', rememberMe: true })
+await postbase.auth.verifyEmailOtp({ email, code: '123456', rememberMe: true })
 
-// OAuth / native id-token flows have no request body at sign-in time, so
-// rememberMe can't be passed there directly. Call setRememberMe afterwards
-// (e.g. right after handleOAuthCallback(), or whenever a user toggles a
-// "remember me" checkbox) — it re-issues the current refresh token with the
-// right TTL and works regardless of how the session was created.
+// Native id-token sign-in — Apple ASAuthorizationController / Google
+// GIDSignIn. Has a request body at sign-in time, so rememberMe applies
+// directly, same as password/OTP — no setRememberMe follow-up needed.
+await postbase.auth.signInWithIdToken({ provider: 'apple', idToken, rememberMe: true })
+await postbase.auth.signInWithIdToken({ provider: 'google', idToken, rememberMe: true })
+
+// Browser/in-app-browser OAuth redirects (signInWithOAuth +
+// handleOAuthCallback — Google, LinkedIn, GitHub, etc. via redirect) are
+// the one exception: tokens come back as URL query params on the
+// callback, not from a call you control, so there's no request body to
+// put rememberMe in. Call setRememberMe afterwards instead — it
+// re-issues the current refresh token with the right TTL and works
+// regardless of how the session was created.
 const { data } = await postbase.auth.setRememberMe(true)
 // data.session.refreshToken is now valid for 30 days
+
+// OAuth remember-me pattern (web): stash the checkbox value before the
+// redirect (the provider round trip loses in-memory state), apply it on
+// the callback page once handleOAuthCallback() resolves and a session
+// exists. Only call setRememberMe when true — server default is 7 days.
+//
+//   sessionStorage.setItem('pb_remember_me', String(rememberMe))
+//   await postbase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })
+//
+//   // on the callback page:
+//   const { data } = await postbase.auth.handleOAuthCallback()
+//   if (data.session && sessionStorage.getItem('pb_remember_me') === 'true') {
+//     await postbase.auth.setRememberMe(true)
+//   }
+//   sessionStorage.removeItem('pb_remember_me')
+//
+// Mobile (React Native / Expo / native): in-app-browser OAuth
+// (WebBrowser.openAuthSessionAsync + signInWithOAuth / handleOAuthCallback)
+// has the same limitation as web OAuth — use setRememberMe after the
+// callback resolves. But the app process stays alive through the whole
+// flow (no full page navigation), so plain in-memory/component state
+// works fine instead of sessionStorage — no persistent stash needed just
+// to survive the round trip.
+//
+// If also using setSession() for SSR cookies (see below), call
+// setRememberMe BEFORE forwarding to the API route, and forward the
+// updated session — setSession() derives cookie maxAge from
+// session.expiresAt, so the cookie gets the correct 30-day lifetime
+// only if you pass the post-setRememberMe session.
 
 // Session + user
 const { data: { user } }    = await postbase.auth.getUser()

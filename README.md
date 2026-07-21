@@ -221,21 +221,17 @@ postbase.auth.onAuthStateChange((event, session) => {
 })
 ```
 
-**Remember me (extended session TTL):** the REST API behind `signup` / `token` / `verify` /
-`email-otp/verify` accepts an optional `remember_me: boolean` in the request body — `true` issues
-a 30-day refresh token instead of the default 7-day one, and the flag is preserved automatically on
-every refresh. Not yet exposed via the `postbasejs` SDK; call the endpoint directly if you need it:
+**Remember me (extended session TTL):** pass `rememberMe: true` to `signUp`, `signInWithPassword`,
+`verifyOtp`, `verifyEmailOtp`, or `signInWithIdToken` to issue a 30-day refresh token instead of the
+default 7-day one. The flag is preserved automatically on every later refresh.
 
 ```ts
-await fetch(`${authBase}/token`, {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${anonKey}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ grant_type: 'password', email, password, remember_me: true }),
-})
+await postbase.auth.signInWithPassword({ email, password, rememberMe: true })
 ```
 
-To flip `remember_me` on an existing session (e.g. after an OAuth sign-in, where there's no request
-body to pass it in up front), use `PATCH /api/auth/v1/{projectId}/session` — see the SKILL reference.
+Browser OAuth redirects (`signInWithOAuth` + `handleOAuthCallback`) have no request body at sign-in
+time, so `rememberMe` can't be passed in directly — call `postbase.auth.setRememberMe(true)` after
+`handleOAuthCallback()` resolves instead. See the SKILL reference for the full pattern.
 
 ### Auth — OAuth (browser / web)
 
@@ -278,6 +274,7 @@ const { data, error } = await postbase.auth.signInWithIdToken({
   provider: 'apple',
   idToken: appleIdentityToken,
   nonce: nonce, // optional, if you passed one to ASAuthorizationAppleIDRequest
+  rememberMe: true, // optional, 30-day refresh token instead of the default 7-day one
 })
 
 // Google (Android / iOS)
