@@ -107,6 +107,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ fn:
   const client = await pool.connect();
 
   try {
+    // search_path must be set on the caller's session too — SELECT * FROM
+    // schema.fn(...) needs it to resolve the function's composite return
+    // type (e.g. `RETURNS events`) when expanding `*`, independent of the
+    // function body's own internal `SET search_path`.
+    await client.query(`SET search_path TO "${schema}", public`);
     // Set RLS context
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
     await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
@@ -127,6 +132,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ fn:
     const message = err instanceof Error ? err.message : "RPC failed";
     return Response.json({ error: message }, { status: 400 });
   } finally {
+    await client.query("RESET search_path").catch(() => {});
     client.release();
   }
 }
@@ -147,15 +153,17 @@ export async function HEAD(req: NextRequest, { params }: { params: Promise<{ fn:
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   const client = await pool.connect();
   try {
+    const headSchema = getProjectSchema(keyInfo.projectId);
+    await client.query(`SET search_path TO "${headSchema}", public`);
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
     await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
-    const headSchema = getProjectSchema(keyInfo.projectId);
     const result = await client.query(`SELECT COUNT(*) FROM ${headSchema}.${fnSafe}()`);
     const count = result.rows[0].count;
     return new Response(null, { headers: { "X-Postbase-Count": count } });
   } catch {
     return new Response(null, { status: 400 });
   } finally {
+    await client.query("RESET search_path").catch(() => {});
     client.release();
   }
 }
