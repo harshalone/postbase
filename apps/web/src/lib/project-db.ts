@@ -27,6 +27,10 @@ function createPool(connectionString: string): Pool {
   return pool;
 }
 
+export function _debugPoolCacheSize(): number {
+  return poolCache.size;
+}
+
 export function getProjectPool(databaseUrl?: string | null): Pool {
   const connectionString = databaseUrl || process.env.DATABASE_URL!;
   let pool = poolCache.get(connectionString);

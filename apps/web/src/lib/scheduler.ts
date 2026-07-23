@@ -120,6 +120,10 @@ export function scheduleJob(
   tasks.set(jobId, task);
 }
 
+export function _debugTaskCount(): number {
+  return tasks.size;
+}
+
 export function unscheduleJob(jobId: string) {
   const existing = tasks.get(jobId);
   if (existing) {
