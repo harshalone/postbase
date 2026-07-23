@@ -7,6 +7,7 @@ import { getProjectPool, getProjectSchema } from "@/lib/project-db";
 type ScheduledTask = nodeCron.ScheduledTask;
 
 const HTTP_PREFIX = "__http__:";
+const MAX_STORED_RESPONSE_BODY_BYTES = 64 * 1024; // 64KB
 
 type HttpJobConfig = {
   method: string;
@@ -18,6 +19,9 @@ type HttpJobConfig = {
 // Map of jobId → active node-cron task
 const tasks = new Map<string, ScheduledTask>();
 
+// Set of jobIds currently mid-run, to skip overlapping ticks
+const runningJobs = new Set<string>();
+
 async function runHttpJob(cfg: HttpJobConfig): Promise<{ statusLine: string; body: string }> {
   const init: RequestInit = {
     method: cfg.method,
@@ -27,7 +31,11 @@ async function runHttpJob(cfg: HttpJobConfig): Promise<{ statusLine: string; bod
     init.body = cfg.body;
   }
   const res = await fetch(cfg.url, init);
-  const body = await res.text();
+  const rawBody = await res.text();
+  const body =
+    rawBody.length > MAX_STORED_RESPONSE_BODY_BYTES
+      ? `${rawBody.slice(0, MAX_STORED_RESPONSE_BODY_BYTES)}\n...[truncated, ${rawBody.length} bytes total]`
+      : rawBody;
   const statusLine = `${res.status} ${res.statusText}`;
   if (!res.ok) {
     const err = new Error(statusLine) as Error & { statusLine: string; body: string };
@@ -112,9 +120,14 @@ export function scheduleJob(
   }
 
   const task = nodeCron.schedule(schedule, () => {
-    runJob(jobId, projectId, command, databaseUrl, retentionDays).catch((err) =>
-      console.error(`[scheduler] job ${jobId} runner error:`, err)
-    );
+    if (runningJobs.has(jobId)) {
+      console.warn(`[scheduler] job ${jobId} skipped tick — previous run still in progress`);
+      return;
+    }
+    runningJobs.add(jobId);
+    runJob(jobId, projectId, command, databaseUrl, retentionDays)
+      .catch((err) => console.error(`[scheduler] job ${jobId} runner error:`, err))
+      .finally(() => runningJobs.delete(jobId));
   });
 
   tasks.set(jobId, task);
@@ -124,12 +137,17 @@ export function _debugTaskCount(): number {
   return tasks.size;
 }
 
+export function _debugRunningJobCount(): number {
+  return runningJobs.size;
+}
+
 export function unscheduleJob(jobId: string) {
   const existing = tasks.get(jobId);
   if (existing) {
     existing.stop();
     tasks.delete(jobId);
   }
+  runningJobs.delete(jobId);
 }
 
 export async function loadAllJobs() {

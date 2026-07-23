@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth/admin";
 import { _debugPoolCacheSize } from "@/lib/project-db";
-import { _debugTaskCount } from "@/lib/scheduler";
+import { _debugTaskCount, _debugRunningJobCount } from "@/lib/scheduler";
 
 export async function GET() {
   const session = await auth();
@@ -23,6 +23,7 @@ export async function GET() {
     inMemoryState: {
       projectPoolCacheSize: _debugPoolCacheSize(),
       scheduledCronTaskCount: _debugTaskCount(),
+      runningCronJobCount: _debugRunningJobCount(),
     },
   });
 }
