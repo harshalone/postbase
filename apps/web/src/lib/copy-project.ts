@@ -649,6 +649,32 @@ export async function getTableCopyOrder(
 
 // ─── Phase 5: Copy data for a single table ────────────────────────────────────
 
+// Returns columns common to both src and dst tables, in dst's column order.
+// Copying by explicit, name-matched column list (rather than positional
+// SELECT *) protects against schema drift — e.g. a column added via
+// ALTER TABLE ADD COLUMN can land in a different ordinal position on tables
+// created at different times, which silently misaligns a positional copy.
+async function getCommonColumns(
+  client: PoolClient,
+  srcSchema: string,
+  dstSchema: string,
+  tableName: string
+): Promise<string[]> {
+  const { rows: srcCols } = await client.query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = $1 AND table_name = $2`,
+    [srcSchema, tableName]
+  );
+  const { rows: dstCols } = await client.query<{ column_name: string; ordinal_position: number }>(
+    `SELECT column_name, ordinal_position FROM information_schema.columns
+     WHERE table_schema = $1 AND table_name = $2
+     ORDER BY ordinal_position`,
+    [dstSchema, tableName]
+  );
+  const srcSet = new Set(srcCols.map((c) => c.column_name));
+  return dstCols.filter((c) => srcSet.has(c.column_name)).map((c) => c.column_name);
+}
+
 export async function copyTableData(
   client: PoolClient,
   srcSchema: string,
@@ -666,11 +692,14 @@ export async function copyTableData(
     );
     const overriding = identityCols.length > 0 ? " OVERRIDING SYSTEM VALUE" : "";
 
+    const columns = await getCommonColumns(client, srcSchema, dstSchema, tableName);
+    const colList = columns.map((c) => `"${c}"`).join(", ");
+
     // Disable triggers on destination table during bulk copy to avoid side effects
     await client.query(`ALTER TABLE "${dstSchema}"."${tableName}" DISABLE TRIGGER ALL`);
     const result = await client.query(
-      `INSERT INTO "${dstSchema}"."${tableName}"${overriding}
-       SELECT * FROM "${srcSchema}"."${tableName}"
+      `INSERT INTO "${dstSchema}"."${tableName}" (${colList})${overriding}
+       SELECT ${colList} FROM "${srcSchema}"."${tableName}"
        ON CONFLICT DO NOTHING`
     );
     await client.query(`ALTER TABLE "${dstSchema}"."${tableName}" ENABLE TRIGGER ALL`);
@@ -700,10 +729,13 @@ export async function copyAuthTableData(
 
   for (const tableName of ["users", "accounts", "sessions"] as const) {
     try {
+      const columns = await getCommonColumns(client, srcSchema, dstSchema, tableName);
+      const colList = columns.map((c) => `"${c}"`).join(", ");
+
       await client.query(`ALTER TABLE "${dstSchema}"."${tableName}" DISABLE TRIGGER ALL`);
       const result = await client.query(
-        `INSERT INTO "${dstSchema}"."${tableName}"
-         SELECT * FROM "${srcSchema}"."${tableName}"
+        `INSERT INTO "${dstSchema}"."${tableName}" (${colList})
+         SELECT ${colList} FROM "${srcSchema}"."${tableName}"
          ON CONFLICT DO NOTHING`
       );
       await client.query(`ALTER TABLE "${dstSchema}"."${tableName}" ENABLE TRIGGER ALL`);
