@@ -323,14 +323,15 @@ export async function POST(req: NextRequest) {
 
     // Set search_path to project schema so bare table names resolve correctly
     const schema = getProjectSchema(keyInfo.projectId);
+    await client.query("BEGIN");
     await client.query(`SET search_path TO "${schema}", public`);
 
     // Set RLS context
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
     await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
-    if (userId) {
-      await client.query("SELECT set_config('postbase.user_id', $1, true)", [userId]);
-    }
+    // Always set it explicitly (even to null) so a pooled connection never
+    // inherits postbase.user_id left over from a previous request.
+    await client.query("SELECT set_config('postbase.user_id', $1, true)", [userId]);
 
     const table = sanitizeIdentifier(input.table);
     const orFilters = ("orFilters" in input ? input.orFilters : undefined) ?? [];
@@ -348,6 +349,7 @@ export async function POST(req: NextRequest) {
           const whereClause = buildWhereClause(filters as Filter[], orFilters, notFilters as Filter[], values);
           sql = `SELECT COUNT(*) FROM "${table}"${joinSql} ${whereClause}`;
           const result = await client.query(sql, values);
+          await client.query("COMMIT");
           return Response.json({ data: null, count: parseInt(result.rows[0].count, 10) });
         }
 
@@ -370,6 +372,7 @@ export async function POST(req: NextRequest) {
           if (input.offset) { values.push(input.offset); sql += ` OFFSET $${values.length}`; }
 
           const result = await client.query(sql, values);
+          await client.query("COMMIT");
           return Response.json({ data: result.rows, count: total });
         }
 
@@ -384,7 +387,10 @@ export async function POST(req: NextRequest) {
 
       case "insert": {
         const rows = Array.isArray(input.data) ? input.data : [input.data];
-        if (rows.length === 0) return Response.json({ data: [], count: 0 });
+        if (rows.length === 0) {
+          await client.query("COMMIT");
+          return Response.json({ data: [], count: 0 });
+        }
 
         const keys = Object.keys(rows[0]).map(sanitizeIdentifier);
         const placeholders = rows.map((row, ri) =>
@@ -405,7 +411,10 @@ export async function POST(req: NextRequest) {
 
       case "upsert": {
         const rows = Array.isArray(input.data) ? input.data : [input.data];
-        if (rows.length === 0) return Response.json({ data: [], count: 0 });
+        if (rows.length === 0) {
+          await client.query("COMMIT");
+          return Response.json({ data: [], count: 0 });
+        }
 
         const keys = Object.keys(rows[0]).map(sanitizeIdentifier);
         values.length = 0;
@@ -443,8 +452,10 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await client.query(sql, values);
+    await client.query("COMMIT");
     return Response.json({ data: result.rows, count: result.rowCount });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     const message = err instanceof Error ? err.message : "Query failed";
     console.error("[db/query] ERROR:", message, "| table:", input.table, "| operation:", input.operation, "| schema:", getProjectSchema(keyInfo.projectId), "| columns:", JSON.stringify("columns" in input ? input.columns : null), "| filters:", JSON.stringify("filters" in input ? input.filters : null));
     return Response.json({ error: message }, { status: 400 });

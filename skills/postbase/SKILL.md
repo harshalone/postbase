@@ -646,6 +646,8 @@ CREATE POLICY "own rows" ON posts
   );
 ```
 
+Each `/api/db/query` and `/api/db/sql` request runs its RLS `set_config` calls and the query itself inside a single transaction on the pooled connection, and `postbase.user_id` is always set explicitly — to the resolved user ID, or to `NULL` when no valid `X-Postbase-Token` is present. This guarantees `current_setting('postbase.user_id', true)` never leaks a value from a previous request on the same pooled connection, and returns `NULL` (not `''`) for anonymous requests — so casting it to `::uuid` in a policy is always safe.
+
 ---
 
 ---

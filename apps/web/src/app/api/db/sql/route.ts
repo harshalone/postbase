@@ -85,16 +85,19 @@ export async function POST(req: NextRequest) {
   const client = await pool.connect();
   try {
     const schema = getProjectSchema(keyInfo.projectId);
+    await client.query("BEGIN");
     await client.query(`SET search_path TO "${schema}", public`);
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
     await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
-    if (userId) {
-      await client.query("SELECT set_config('postbase.user_id', $1, true)", [userId]);
-    }
+    // Always set it explicitly (even to null) so a pooled connection never
+    // inherits postbase.user_id left over from a previous request.
+    await client.query("SELECT set_config('postbase.user_id', $1, true)", [userId]);
 
     const result = await client.query(query, params as unknown[]);
+    await client.query("COMMIT");
     return Response.json({ data: result.rows, count: result.rowCount });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     const message = err instanceof Error ? err.message : "Query failed";
     console.error("[db/sql] ERROR:", message);
     return Response.json({ error: message }, { status: 400 });
