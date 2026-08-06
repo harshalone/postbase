@@ -468,6 +468,7 @@ async function handleOAuthCallback(
       access_token: postbaseAccessToken,
       refresh_token: refreshToken,
       expires_at: String(expiresAt),
+      refresh_token_expires_at: String(refreshExpiresAt),
       user: Buffer.from(JSON.stringify(userOut)).toString("base64url"),
     });
 

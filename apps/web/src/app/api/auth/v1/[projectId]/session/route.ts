@@ -230,7 +230,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pr
     };
 
     return Response.json({
-      session: { accessToken, refreshToken: newRefreshToken, expiresAt, user: userOut },
+      session: { accessToken, refreshToken: newRefreshToken, expiresAt, refreshTokenExpiresAt: refreshExpiresAt, user: userOut },
     });
   } finally {
     client.release();

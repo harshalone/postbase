@@ -141,7 +141,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
     return Response.json({
       user: userOut,
-      session: { accessToken, refreshToken, expiresAt, user: userOut },
+      session: { accessToken, refreshToken, expiresAt, refreshTokenExpiresAt: refreshExpiresAt, user: userOut },
     });
   } finally {
     client.release();
