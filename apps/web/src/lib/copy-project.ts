@@ -64,17 +64,30 @@ async function getExtensionOwnedNames(client: PoolClient, schema: string): Promi
 // Builds a rewriter that replaces "srcSchema." prefixes with "dstSchema." in SQL,
 // EXCEPT when the qualified name is an extension-owned object that must keep
 // resolving against the source schema (where the extension actually lives).
+// Also rewrites the source schema name when it appears bare (no trailing dot)
+// inside a `SET search_path` clause — pg_get_functiondef() emits function
+// bodies as `SET search_path TO "srcSchema", public`, which has no `.` after
+// the schema name, so the qualified-identifier regex below never matches it.
+// Missing this left copied trigger functions pinned to the SOURCE project's
+// schema forever — e.g. an AFTER INSERT trigger that silently keeps writing
+// into the wrong project after every copy (see incident 2026-08-03).
 function makeSchemaRewriter(
   srcSchema: string,
   dstSchema: string,
   preserveNames: ReadonlySet<string>
 ): (sql: string) => string {
-  const pattern = new RegExp(`\\b${srcSchema}\\.("[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)`, "g");
+  const qualifiedPattern = new RegExp(`\\b${srcSchema}\\.("[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)`, "g");
+  const searchPathPattern = new RegExp(
+    `(SET(?:\\s+LOCAL)?\\s+search_path\\s*(?:TO|=)\\s*)(['"]?)${srcSchema}\\2`,
+    "gi"
+  );
   return (sql: string) =>
-    sql.replace(pattern, (match, ident: string) => {
-      const name = ident.startsWith('"') ? ident.slice(1, -1) : ident;
-      return preserveNames.has(name) ? match : `${dstSchema}.${ident}`;
-    });
+    sql
+      .replace(qualifiedPattern, (match, ident: string) => {
+        const name = ident.startsWith('"') ? ident.slice(1, -1) : ident;
+        return preserveNames.has(name) ? match : `${dstSchema}.${ident}`;
+      })
+      .replace(searchPathPattern, (_match, prefix: string, quote: string) => `${prefix}${quote}${dstSchema}${quote}`);
 }
 
 // Copies user-created enum types (not extension-owned) into the destination
@@ -361,14 +374,26 @@ export async function copyTableSchemas(
 
   const createdSet = new Set(created);
   for (const fk of fks) {
-    // Only add FKs where both sides were successfully created as user tables
-    if (!createdSet.has(fk.table_name) || !createdSet.has(fk.foreign_table)) continue;
+    if (!createdSet.has(fk.table_name)) continue;
+
+    // FKs into AUTH_TABLES (users, accounts, sessions, verification_tokens)
+    // aren't in `created` — those tables are Postbase-managed and provisioned
+    // separately per project, not copied by this pass. They still exist in
+    // dstSchema by the time this runs (Postbase creates them at project
+    // creation), so repoint the FK there instead of silently dropping it —
+    // previously this constraint was just skipped entirely, leaving copied
+    // tables with a user_id column but NO referential integrity at all.
+    const targetSchema = AUTH_TABLES.has(fk.foreign_table) || createdSet.has(fk.foreign_table)
+      ? dstSchema
+      : null;
+    if (targetSchema === null) continue; // foreign table genuinely wasn't copied/doesn't exist — skip
+
     try {
       await client.query(
         `ALTER TABLE "${dstSchema}"."${fk.table_name}"
          ADD CONSTRAINT "${fk.constraint_name}"
          FOREIGN KEY ("${fk.column_name}")
-         REFERENCES "${dstSchema}"."${fk.foreign_table}" ("${fk.foreign_column}")
+         REFERENCES "${targetSchema}"."${fk.foreign_table}" ("${fk.foreign_column}")
          ON UPDATE ${fk.update_rule} ON DELETE ${fk.delete_rule}`
       );
     } catch {
