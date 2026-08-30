@@ -96,7 +96,7 @@ Headers: X-Postbase-Token: <access_token>
 ```
 PATCH /api/auth/v1/{projectId}/session
 Body: { "refresh_token": "...", "remember_me": true }
-200: { session: { accessToken, refreshToken, expiresAt, user } } | 401: invalid/expired refresh token
+200: { session: { accessToken, refreshToken, expiresAt, refreshTokenExpiresAt, user } } | 401: invalid/expired refresh token
 ```
 Re-issues the caller's refresh token with the TTL for the new `remember_me` value (30 days if `true`,
 7 if `false`), regardless of how the session was originally created. Use this to toggle "remember me"
@@ -476,13 +476,14 @@ const { data } = await postbase.auth.setRememberMe(true)
 // If also using setSession() for SSR cookies (see below), call
 // setRememberMe BEFORE forwarding to the API route, and forward the
 // updated session — setSession() derives cookie maxAge from
-// session.expiresAt, so the cookie gets the correct 30-day lifetime
-// only if you pass the post-setRememberMe session.
+// session.refreshTokenExpiresAt, so the cookie gets the correct 30-day
+// lifetime only if you pass the post-setRememberMe session.
 
 // Session + user
 const { data: { user } }    = await postbase.auth.getUser()
 const { data: { session } } = await postbase.auth.getSession()
-// session.accessToken, session.user, session.expiresAt
+// session.accessToken, session.user, session.expiresAt (access token TTL),
+// session.refreshTokenExpiresAt (refresh token TTL — drives cookie maxAge)
 
 // getUser() SSR fix (postbasejs 0.5.9): on a createServerClient, getUser()
 // previously ignored the cookieAdapter and always returned { user: null }
@@ -615,6 +616,8 @@ const postbase = createBrowserClient(url, anonKey, { projectId })
 ```
 
 > **v0.5.13 fix:** `auth.setSession()` on a server client used to set the session cookie's `Secure` flag based on the Postbase API's URL scheme (`https://...`) rather than the app's own origin. That breaks whenever the API is HTTPS but the app runs on `http://localhost` in dev — Chrome accepts a `Secure` cookie on localhost, Safari silently drops it, so the session never persists and users loop back to the login page after OTP/OAuth. Fixed by deriving `Secure` from `NODE_ENV === 'production'`. Upgrade to ≥ 0.5.13 if you see Safari-only login loops.
+
+> **v0.5.17 fix:** `auth.setSession()`'s cookie `maxAge` used to be derived from `session.expiresAt` — the access token's ~1-hour TTL — even though the cookie stores the refresh token. The login cookie therefore always expired in ~1 hour regardless of the refresh token's real 7/30-day TTL. Fixed by adding `session.refreshTokenExpiresAt` (the refresh token's own expiry) and deriving `maxAge` from that instead; falls back to a 7-day default if absent. **Requires Postbase server ≥ the version that returns `refreshTokenExpiresAt`** in `/token`, `/email-otp/verify`, `/oauth/callback/*`, `/oauth/id-token`, and `PATCH /session` responses — on an older server this field is simply missing and the 7-day fallback applies (same behavior as before the fix). Upgrade both server and SDK to get the correct cookie lifetime.
 
 ### Environment Variables
 
