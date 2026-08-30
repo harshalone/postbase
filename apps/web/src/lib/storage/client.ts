@@ -1,6 +1,6 @@
 /**
  * Storage client factory — connects to the configured S3-compatible storage
- * for a given project (MinIO by default, or per-project S3/R2/GCS connection).
+ * for a given project (per-project S3/R2/GCS connection).
  */
 import { db } from "@/lib/db";
 import { storageConnections } from "@/lib/db/schema";
@@ -18,8 +18,8 @@ export interface StorageAdapter {
 }
 
 /**
- * Minimal S3/MinIO client using the AWS Signature V4 algorithm via fetch.
- * Works with MinIO, AWS S3, Cloudflare R2, Backblaze B2, and other S3-compatible APIs.
+ * Minimal S3 client using the AWS Signature V4 algorithm via fetch.
+ * Works with AWS S3, Cloudflare R2, Backblaze B2, and other S3-compatible APIs.
  */
 class S3Client implements StorageAdapter {
   constructor(

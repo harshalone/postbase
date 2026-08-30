@@ -113,7 +113,7 @@ export const storageConnections = postbaseSchema.table(
     provider: text("provider").notNull(), // 's3' | 'r2' | 'gcs' | 'backblaze'
     bucket: text("bucket").notNull(),
     region: text("region"),
-    endpoint: text("endpoint"), // custom endpoint for R2/Backblaze/MinIO
+    endpoint: text("endpoint"), // custom endpoint for R2/Backblaze/other S3-compatible providers
     accessKeyId: text("access_key_id").notNull(),
     secretAccessKey: text("secret_access_key").notNull(),
     isDefault: boolean("is_default").default(false).notNull(),

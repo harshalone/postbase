@@ -5,12 +5,9 @@ set -e
 POSTGRES_USER="${POSTGRES_USER:-postbase}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postbase}"
 POSTGRES_DB="${POSTGRES_DB:-postbase}"
-MINIO_ROOT_USER="${MINIO_ROOT_USER:-postbase}"
-MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-postbase_secret}"
 PORT="${PORT:-3000}"
 export PORT
 
-export MINIO_ROOT_USER MINIO_ROOT_PASSWORD
 export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}"
 
 # ── Postgres data dir ─────────────────────────────────────────────────────────
@@ -72,9 +69,6 @@ gosu postgres psql -v ON_ERROR_STOP=1 \
 echo "==> Seed done."
 
 gosu postgres /usr/lib/postgresql/18/bin/pg_ctl -D /data/postgres -w stop
-
-# ── MinIO data dir ────────────────────────────────────────────────────────────
-mkdir -p /data/minio
 
 # ── Supervisor log dir ────────────────────────────────────────────────────────
 mkdir -p /var/log/supervisor

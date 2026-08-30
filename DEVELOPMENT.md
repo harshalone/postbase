@@ -17,7 +17,7 @@
 | UI | Tailwind CSS v4 + Radix UI primitives |
 | Icons | lucide-react |
 | Monorepo | Turbo + pnpm workspaces |
-| Storage backend | MinIO (S3-compatible); also supports AWS S3, Cloudflare R2 |
+| Storage backend | Per-project S3-compatible connection — AWS S3, Cloudflare R2, Backblaze B2, etc. |
 | Storage signing | AWS Signature V4 — Web Crypto API, no AWS SDK |
 | Email | nodemailer v7 |
 | Password hashing | bcryptjs |
@@ -468,7 +468,7 @@ Full AWS Signature V4 implementation using Web Crypto API — no AWS SDK depende
 getStorageClient(projectId)  // → StorageAdapter
 ```
 
-Lookup order: project's default `storage_connections` row → falls back to `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` env vars.
+Reads the project's default `storage_connections` row for endpoint/credentials.
 
 `StorageAdapter` interface: `putObject`, `getObject`, `deleteObject`, `deleteObjects`, `listObjects`, `copyObject`, `headObject`, `getSignedUrl`.
 
@@ -611,9 +611,6 @@ Exports:
 | `NEXTAUTH_SECRET` | NextAuth + fallback JWT secret |
 | `NEXTAUTH_URL` | App base URL |
 | `POSTBASE_JWT_SECRET` | JWT signing secret (preferred over `NEXTAUTH_SECRET`) |
-| `MINIO_ENDPOINT` | MinIO endpoint (default: `http://localhost:9000`) |
-| `MINIO_ACCESS_KEY` | MinIO access key (default: `minioadmin`) |
-| `MINIO_SECRET_KEY` | MinIO secret key (default: `minioadmin`) |
 
 ---
 

@@ -1,0 +1,48 @@
+spec:
+  name: postbase
+
+  services:
+    - name: postbase
+      dockerfile_path: Dockerfile.railway
+      source_dir: /
+      github:
+        repo: harshalone/postbase
+        branch: main
+        deploy_on_push: true
+      http_port: 3000
+      instance_size_slug: apps-s-1vcpu-1gb
+      instance_count: 1
+      health_check:
+        http_path: /api/health
+        initial_delay_seconds: 30
+        period_seconds: 10
+        timeout_seconds: 5
+        failure_threshold: 6
+      envs:
+        - key: DATABASE_URL
+          scope: RUN_TIME
+          value: ${postbase-db.DATABASE_URL}
+        - key: NEXTAUTH_URL
+          scope: RUN_TIME
+          value: ${APP_URL}
+        - key: NEXTAUTH_SECRET
+          scope: RUN_TIME
+          type: SECRET
+          value: ${AUTH_SECRET}
+        - key: POSTBASE_JWT_SECRET
+          scope: RUN_TIME
+          type: SECRET
+          value: ${AUTH_SECRET}
+
+  databases:
+    - name: postbase-db
+      engine: PG
+      version: "16"
+      production: false
+
+  envs:
+    - key: AUTH_SECRET
+      scope: RUN_TIME
+      type: SECRET
+      value: ""
+      generate_value: true

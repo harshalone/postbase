@@ -9,6 +9,7 @@ Self-hosted auth + database platform for Next.js. Drop it in, configure your pro
 Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/postbase?referralCode=lonare&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/harshalone/postbase/tree/main)
 
 ---
 
@@ -100,7 +101,6 @@ docker compose up -d
 
 This starts:
 - **PostgreSQL** on port `5432`
-- **MinIO** (storage) on port `9000` (console on `9001`)
 - **Postbase app** on port `3000`
 
 ### 3. Run database migrations
@@ -123,7 +123,7 @@ Visit [http://localhost:3000/dashboard](http://localhost:3000/dashboard)
 
 ## Local Development
 
-For development you don't need to rebuild Docker on every change. Run only the infrastructure (PostgreSQL + MinIO) in Docker and the Next.js app locally with hot reload.
+For development you don't need to rebuild Docker on every change. Run only the infrastructure (PostgreSQL) in Docker and the Next.js app locally with hot reload.
 
 The quickest way is the included `dev.sh` script:
 
@@ -141,7 +141,7 @@ Or manually:
 pnpm infra:up
 ```
 
-This starts PostgreSQL and MinIO in Docker — without the app container.
+This starts PostgreSQL in Docker — without the app container.
 
 ### 2. Run the app locally
 
@@ -156,8 +156,8 @@ That's it. Edit code → changes reflect instantly, no Docker rebuild needed.
 
 | Command | Description |
 |---------|-------------|
-| `pnpm infra:up` | Start postgres + minio |
-| `pnpm infra:down` | Stop postgres + minio (data is preserved) |
+| `pnpm infra:up` | Start postgres |
+| `pnpm infra:down` | Stop postgres (data is preserved) |
 | `pnpm infra:logs` | Tail infrastructure logs |
 | `pnpm dev` | Start Next.js dev server |
 | `pnpm db:push` | Push schema changes to the database |
@@ -388,8 +388,6 @@ Enable any of these from the dashboard — no code changes needed.
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://postbase:postbase@localhost:5432/postbase` |
 | `NEXTAUTH_SECRET` | Secret for signing tokens — **required** | — |
 | `NEXTAUTH_URL` | Public URL of your Postbase instance | `http://localhost:3000` |
-| `MINIO_ROOT_USER` | MinIO access key | `postbase` |
-| `MINIO_ROOT_PASSWORD` | MinIO secret key | `postbase_secret` |
 
 ---
 

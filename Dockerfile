@@ -37,7 +37,7 @@ RUN cd /tmp \
     && rm -rf /tmp/pgmq
 
 
-# ─── Stage 3: Runtime — Postgres + MinIO + Next.js in one container ───────────
+# ─── Stage 3: Runtime — Postgres + Next.js in one container ───────────────────
 FROM debian:bookworm-slim AS runner
 
 # ── System deps ───────────────────────────────────────────────────────────────
@@ -61,10 +61,6 @@ COPY --from=pgbuilder /usr/share/postgresql/18/extension/pgmq* /usr/share/postgr
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
-
-# ── MinIO ─────────────────────────────────────────────────────────────────────
-RUN curl -fsSL https://dl.min.io/server/minio/release/linux-amd64/minio -o /usr/local/bin/minio \
-    && chmod +x /usr/local/bin/minio
 
 # ── Next.js app ───────────────────────────────────────────────────────────────
 WORKDIR /app

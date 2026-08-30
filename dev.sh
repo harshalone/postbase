@@ -122,19 +122,19 @@ do_down() {
 
 do_logs() {
   info "Tailing infra logs (Ctrl+C to exit)..."
-  (cd "$ROOT_DIR" && docker compose logs -f postgres minio)
+  (cd "$ROOT_DIR" && docker compose logs -f postgres)
 }
 
 do_infra() {
   local rebuild="${1:-false}"
   divider
-  info "Starting infrastructure (PostgreSQL + MinIO)..."
+  info "Starting infrastructure (PostgreSQL)..."
   if [ "$rebuild" = "true" ]; then
     info "Rebuilding Docker images..."
     (cd "$ROOT_DIR" && docker compose build postgres)
     success "Images rebuilt"
   fi
-  (cd "$ROOT_DIR" && docker compose up -d postgres minio)
+  (cd "$ROOT_DIR" && docker compose up -d postgres)
   wait_for_postgres
 }
 
@@ -157,7 +157,6 @@ do_app() {
   info "Starting Next.js dev server..."
   dim "  App will be available at → http://localhost:3000"
   dim "  Dashboard              → http://localhost:3000/dashboard"
-  dim "  MinIO console          → http://localhost:9001"
   divider
   (cd "$ROOT_DIR" && pnpm dev)
 }

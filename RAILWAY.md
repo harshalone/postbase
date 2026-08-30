@@ -4,60 +4,54 @@ Postbase is a self-hosted auth and database platform for Next.js. Drop it into y
 
 ## About Hosting Postbase
 
-Postbase ships as a single Docker container bundling PostgreSQL 18 (with pg_cron and pgmq), MinIO object storage, and the Next.js dashboard — all managed by supervisord. Deploying on Railway means one service, one attached volume, and a handful of environment variables. Railway detects the root Dockerfile automatically. You attach a volume at `/data` to persist your database and object storage, set a few secrets, generate a public domain, and you're live. No separate database service or storage bucket required — everything runs together out of the box.
+On Railway, Postbase runs as two services: `postbase` (a slim Next.js-only app built from `Dockerfile.railway`) and `Postgres` (Railway's managed database with a persistent volume). Splitting stateful and stateless services means git pushes only redeploy the app container — your data is untouched on every deploy. Railway builds `Dockerfile.railway` automatically per `railway.toml`; you link a Postgres service, set a couple of secrets, generate a public domain, and you're live.
 
 ## Common Use Cases
 
 - **Add auth to a Next.js app** — enable email/password, magic links, or any of 25+ OAuth providers (GitHub, Google, Discord, and more) from the dashboard without writing auth code
 - **Self-host your user database** — store users, sessions, and OAuth accounts in your own Postgres instance with full SQL access via the built-in editor
-- **Manage files and storage** — use the bundled MinIO instance or connect Amazon S3, Cloudflare R2, or Backblaze B2 for per-project object storage
+- **Manage files and storage** — connect Amazon S3, Cloudflare R2, Backblaze B2, or any S3-compatible bucket per-project from the dashboard
 
 ## Dependencies for Postbase Hosting
 
-- **Docker** — Postbase is packaged as a single image; Railway builds and runs it automatically from the repo's root `Dockerfile`
-- **Persistent volume** — attach a Railway volume at `/data` before first deploy to persist PostgreSQL data and MinIO object storage across redeploys
+- **Docker** — Railway builds and runs `Dockerfile.railway` automatically per `railway.toml`
+- **Railway Postgres service** — a managed Postgres database, linked to the app via a variable reference
 
 ### Deployment Dependencies
 
-- [Railway Volumes](https://docs.railway.com/reference/volumes) — required to persist `/data/postgres` and `/data/minio`
+- [Railway Volumes](https://docs.railway.com/reference/volumes) — used by the Postgres service to persist data; the app service itself is stateless and needs no volume
 - [Railway Networking — Generate Domain](https://docs.railway.com/reference/public-networking) — needed to set `NEXTAUTH_URL` to your public URL
 - [Postbase README](https://github.com/lonare/postbase.com/blob/main/README.md) — full setup guide including SDK usage and local development
 
 ### Implementation Details
 
-Postbase runs three processes inside one container via supervisord:
+Postbase runs two services on Railway:
 
-| Process | Port | Description |
-|---|---|---|
-| PostgreSQL 18 | 5432 (internal) | Custom build with pg_cron + pgmq |
-| MinIO | 9000 (internal) | S3-compatible object storage |
-| Next.js app | 3000 (public) | Dashboard + auth API |
+| Service | Description |
+|---|---|
+| `postbase` | Next.js dashboard + auth/database API, built from `Dockerfile.railway`, port `3000` (internal; Railway assigns the public port dynamically) |
+| `Postgres` | Railway's managed Postgres, linked to `postbase` via `DATABASE_URL` |
 
-Only port `3000` is exposed. Postgres and MinIO are internal only.
+On boot, `docker/entrypoint-railway.sh` waits for Postgres to accept connections, applies any pending SQL migrations from `apps/web/drizzle/`, then starts the Next.js server with `HOSTNAME=0.0.0.0` (required — the standalone server binds to localhost by default, which Railway's proxy can't reach). Migration failures are logged but non-fatal, so `/api/health` can report a readable error instead of the deploy looping on a failed healthcheck.
 
-**Minimum required environment variables** (paste into Railway → Variables → RAW Editor):
+**Variables set via `railway.toml`** (no manual entry needed for these):
 
 ```
-POSTGRES_USER=postbase
-POSTGRES_PASSWORD=changeme
-POSTGRES_DB=postbase
-MINIO_ROOT_USER=postbase
-MINIO_ROOT_PASSWORD=changeme
+NEXTAUTH_URL         = https://${{RAILWAY_PUBLIC_DOMAIN}}
+NEXTAUTH_SECRET       = ${{AUTH_SECRET}}
+POSTBASE_JWT_SECRET   = ${{AUTH_SECRET}}
+DATABASE_URL          = ${{Postgres.DATABASE_URL}}
+```
+
+**Minimum manual variable** (Railway → `postbase` service → Variables):
+
+```
 AUTH_SECRET=changeme
 ```
 
-> Generate strong values: `openssl rand -base64 32`
+> Generate a strong value: `openssl rand -base64 32`
 
-The following are derived automatically and do not need to be set manually:
-
-```
-NEXTAUTH_SECRET=${{AUTH_SECRET}}
-POSTBASE_JWT_SECRET=${{AUTH_SECRET}}
-DATABASE_URL=postgresql://${{POSTGRES_USER}}:${{POSTGRES_PASSWORD}}@localhost:5432/${{POSTGRES_DB}}
-MINIO_ENDPOINT=http://localhost:9000
-MINIO_ACCESS_KEY=${{MINIO_ROOT_USER}}
-MINIO_SECRET_KEY=${{MINIO_ROOT_PASSWORD}}
-```
+Make sure `DATABASE_URL` is a **variable reference** to the linked Postgres service (`${{Postgres.DATABASE_URL}}`), not a hardcoded connection string.
 
 ## Why Deploy Postbase on Railway?
 
