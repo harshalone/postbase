@@ -45,4 +45,3 @@ spec:
       scope: RUN_TIME
       type: SECRET
       value: ""
-      generate_value: true
