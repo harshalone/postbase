@@ -75,6 +75,7 @@
 import { NextRequest } from "next/server";
 import { signJwt, ACCESS_TOKEN_TTL, getRefreshTokenTTL, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
+import { logAuditEvent } from "@/lib/audit-log";
 import { nanoid } from "nanoid";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
@@ -137,6 +138,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
        ON CONFLICT DO NOTHING`,
       [refreshToken, user.id, new Date(refreshExpiresAt * 1000), rememberMe]
     );
+
+    logAuditEvent({
+      projectId,
+      userId: user.id,
+      action: "auth.sign_in",
+      req,
+      metadata: { email: user.email, method: "magic_link" },
+    });
 
     const response = Response.redirect(new URL(redirectTo, req.url));
     const cookieOpts = [
@@ -234,6 +243,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       metadata: user.metadata,
       createdAt: user.created_at,
     };
+
+    logAuditEvent({
+      projectId,
+      userId: user.id,
+      action: "auth.sign_in",
+      req,
+      metadata: { email: user.email, method: "magic_link" },
+    });
 
     return Response.json({
       user: userOut,

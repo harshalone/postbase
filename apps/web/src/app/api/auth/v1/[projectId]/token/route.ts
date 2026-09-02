@@ -55,6 +55,7 @@ import { z } from "zod";
 import { validateApiKey } from "@/lib/auth/keys";
 import { signJwt, verifyJwt, ACCESS_TOKEN_TTL, getRefreshTokenTTL, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
+import { logAuditEvent } from "@/lib/audit-log";
 import { nanoid } from "nanoid";
 
 const passwordSchema = z.object({
@@ -145,6 +146,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
         createdAt: user.created_at,
       };
 
+      logAuditEvent({
+        projectId: keyInfo.projectId,
+        userId: user.id,
+        action: "auth.sign_in",
+        req,
+        metadata: { email: user.email, method: "password" },
+      });
+
       return Response.json({
         user: userOut,
         session: { accessToken, refreshToken, expiresAt, refreshTokenExpiresAt: refreshExpiresAt, user: userOut },
@@ -200,6 +209,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       metadata: user.metadata,
       createdAt: user.created_at,
     };
+
+    logAuditEvent({
+      projectId: keyInfo.projectId,
+      userId: user.id,
+      action: "auth.token_refresh",
+      req,
+      metadata: { email: user.email },
+    });
 
     return Response.json({
       user: userOut,

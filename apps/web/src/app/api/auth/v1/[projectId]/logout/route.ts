@@ -30,6 +30,7 @@ import { NextRequest } from "next/server";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
+import { logAuditEvent } from "@/lib/audit-log";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
@@ -58,6 +59,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       } finally {
         client.release();
       }
+
+      logAuditEvent({
+        projectId: keyInfo.projectId,
+        userId: payload.sub,
+        action: "auth.sign_out",
+        req,
+      });
     }
   }
 

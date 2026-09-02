@@ -47,6 +47,7 @@ import { z } from "zod";
 import { validateApiKey } from "@/lib/auth/keys";
 import { signJwt, ACCESS_TOKEN_TTL, getRefreshTokenTTL, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectPool, getProjectSchema, ensureProjectAuthTables } from "@/lib/project-db";
+import { logAuditEvent } from "@/lib/audit-log";
 import { nanoid } from "nanoid";
 
 const bodySchema = z.object({
@@ -138,6 +139,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       metadata: user.metadata,
       createdAt: user.created_at,
     };
+
+    logAuditEvent({
+      projectId: keyInfo.projectId,
+      userId: user.id,
+      action: "auth.sign_in",
+      req,
+      metadata: { email: user.email, method: "email_otp" },
+    });
 
     return Response.json({
       user: userOut,

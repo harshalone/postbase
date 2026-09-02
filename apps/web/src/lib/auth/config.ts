@@ -1,5 +1,7 @@
 import { type NextAuthConfig } from "next-auth";
+import { type NextRequest } from "next/server";
 import { getBaseUrl } from "@/lib/get-base-url";
+import { logAuditEvent } from "@/lib/audit-log";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 import Discord from "next-auth/providers/discord";
@@ -33,7 +35,8 @@ export type ProviderConfig = {
  */
 export async function buildAuthConfig(
   projectId: string,
-  enabledProviders: ProviderConfig[]
+  enabledProviders: ProviderConfig[],
+  req?: NextRequest
 ): Promise<NextAuthConfig> {
   const providerInstances = [];
 
@@ -155,6 +158,21 @@ export async function buildAuthConfig(
           session.user.id = token.id as string;
         }
         return session;
+      },
+    },
+    events: {
+      async signIn({ user, account }) {
+        if (!user.id) return;
+        logAuditEvent({
+          projectId,
+          userId: user.id,
+          action: "auth.sign_in",
+          req,
+          metadata: {
+            email: user.email,
+            method: account?.provider ?? "oauth",
+          },
+        });
       },
     },
   };

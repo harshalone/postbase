@@ -1,71 +1,62 @@
+import { db } from "@/lib/db";
+import { auditLogs, projects } from "@/lib/db/schema";
+import { and, count, desc, eq } from "drizzle-orm";
 import { PageHeader } from "../_components/page-header";
+import { LogsTable } from "./_components/logs-table";
+import type { AuditEvent } from "./_components/logs-table";
+import { resolveUserEmails } from "@/lib/resolve-user-emails";
+
+const PER_PAGE = 50;
 
 export default async function AuditLogsPage({
   params,
 }: {
   params: Promise<{ projectId: string }>;
 }) {
-  await params;
+  const { projectId } = await params;
+
+  const [project] = await db
+    .select({ id: projects.id, databaseUrl: projects.databaseUrl })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+
+  let initialEvents: AuditEvent[] = [];
+  let initialTotal = 0;
+
+  if (project) {
+    const where = and(eq(auditLogs.projectId, projectId));
+
+    const [{ total }] = await db.select({ total: count() }).from(auditLogs).where(where);
+    initialTotal = total;
+
+    const rows = await db
+      .select()
+      .from(auditLogs)
+      .where(where)
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(PER_PAGE);
+
+    const userIds = [...new Set(rows.map((r) => r.userId).filter((id): id is string => !!id))];
+    const emailById = await resolveUserEmails(projectId, project.databaseUrl, userIds);
+
+    initialEvents = rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      userId: r.userId,
+      userEmail: r.userId ? emailById.get(r.userId) ?? null : null,
+      ipAddress: r.ipAddress,
+      userAgent: r.userAgent,
+      metadata: r.metadata as Record<string, unknown>,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
 
   return (
     <div className="flex flex-col h-full">
       <PageHeader title="Audit Logs" />
       <div className="p-6 overflow-auto">
-        {/* Filters */}
-        <div className="flex gap-3 mb-6">
-          <input
-            disabled
-            placeholder="Search by action or user…"
-            className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-zinc-500 placeholder-zinc-600 cursor-not-allowed"
-          />
-          <select
-            disabled
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-500 cursor-not-allowed"
-          >
-            <option>All actions</option>
-            <option>sign_in</option>
-            <option>sign_out</option>
-            <option>sign_up</option>
-            <option>token_refresh</option>
-          </select>
-          <select
-            disabled
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-500 cursor-not-allowed"
-          >
-            <option>Last 24 hours</option>
-            <option>Last 7 days</option>
-            <option>Last 30 days</option>
-          </select>
-        </div>
-
-        {/* Logs table */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
-                <th className="text-left px-6 py-3 font-medium">Timestamp</th>
-                <th className="text-left px-6 py-3 font-medium">Action</th>
-                <th className="text-left px-6 py-3 font-medium">User</th>
-                <th className="text-left px-6 py-3 font-medium">IP Address</th>
-                <th className="text-left px-6 py-3 font-medium">User Agent</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td colSpan={5} className="px-6 py-20 text-center text-zinc-500">
-                  <p className="text-base font-medium text-zinc-400 mb-1">No events recorded</p>
-                  <p className="text-sm">
-                    Auth events like sign-ins and sign-ups will appear here.
-                  </p>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <p className="text-xs text-zinc-600 mt-4 text-center">
-          Real-time event streaming and log export coming soon.
-        </p>
+        <LogsTable projectId={projectId} initialEvents={initialEvents} initialTotal={initialTotal} />
       </div>
     </div>
   );

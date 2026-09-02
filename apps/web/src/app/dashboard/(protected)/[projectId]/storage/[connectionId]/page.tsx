@@ -394,12 +394,15 @@ export default function StorageBrowserPage({
   const [activeFile, setActiveFile] = useState<StorageObject | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [search, setSearch] = useState("");
+  const [nextToken, setNextToken] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const fetchObjects = useCallback(
     async (p = prefix) => {
       setLoading(true);
       setSelected(new Set());
       setActiveFile(null);
+      setNextToken(null);
       try {
         const res = await fetch(
           `/api/dashboard/${projectId}/storage/${connectionId}/browse?prefix=${encodeURIComponent(p)}`,
@@ -412,6 +415,7 @@ export default function StorageBrowserPage({
         }
         const fetched: StorageObject[] = data.objects ?? [];
         setObjects(fetched);
+        setNextToken(data.isTruncated ? data.nextToken ?? null : null);
         if (data.bucket) setBucketName(data.bucket);
         // Keep root-level folders in sync so the sidebar always shows them
         if (p === "") setRootFolders(fetched.filter((o) => o.isFolder));
@@ -422,6 +426,28 @@ export default function StorageBrowserPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId, connectionId, prefix]
   );
+
+  async function loadMoreObjects() {
+    if (!nextToken || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `/api/dashboard/${projectId}/storage/${connectionId}/browse?prefix=${encodeURIComponent(prefix)}&token=${encodeURIComponent(nextToken)}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json();
+      if (data.error) {
+        toast.error("Failed to load more objects", data.error);
+        return;
+      }
+      const fetched: StorageObject[] = data.objects ?? [];
+      setObjects((prev) => [...prev, ...fetched]);
+      setNextToken(data.isTruncated ? data.nextToken ?? null : null);
+      if (prefix === "") setRootFolders((prev) => [...prev, ...fetched.filter((o) => o.isFolder)]);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/dashboard/${projectId}/storage`)
@@ -651,7 +677,7 @@ export default function StorageBrowserPage({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search files and folders…"
+              placeholder="Search loaded files and folders…"
               className="w-full pl-7 pr-3 py-1.5 text-xs bg-zinc-800/50 border border-zinc-700/50 rounded-lg text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
             />
           </div>
@@ -791,6 +817,25 @@ export default function StorageBrowserPage({
                 })}
               </tbody>
             </table>
+          )}
+
+          {!loading && !search && nextToken && (
+            <div className="flex items-center justify-center py-4 border-t border-zinc-800/40">
+              <button
+                onClick={loadMoreObjects}
+                disabled={loadingMore}
+                className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 transition-colors disabled:opacity-50"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 size={11} className="animate-spin" />
+                    Loading…
+                  </>
+                ) : (
+                  "Load more"
+                )}
+              </button>
+            </div>
           )}
         </div>
       </div>

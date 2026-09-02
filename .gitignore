@@ -31,3 +31,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 node_modules
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/

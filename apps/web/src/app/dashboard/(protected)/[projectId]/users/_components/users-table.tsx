@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useSlidePanel } from "@/hooks/use-slide-panel";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, X, AlertTriangle, Trash2 } from "lucide-react";
+import { Plus, X, AlertTriangle, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { AddColumnModal } from "./add-column-modal";
+
+const PER_PAGE = 50;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -348,9 +350,39 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
   const [search, setSearch] = useState("");
   const [selectedCol, setSelectedCol] = useState<UserColumnDef | null>(null);
   const [userToDelete, setUserToDelete] = useState<DashboardUser | null>(null);
+  const [page, setPage] = useState(1);
+  const [loadingPage, setLoadingPage] = useState(false);
 
   const addColumnPanel = useSlidePanel();
   const colDetailPanel = useSlidePanel();
+
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+
+  useEffect(() => {
+    if (page === 1) return;
+
+    let cancelled = false;
+    setLoadingPage(true);
+
+    fetch(`/api/dashboard/${projectId}/users?page=${page}&perPage=${PER_PAGE}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        setUsers(data.users);
+        setTotal(data.total);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load users", "Please try again");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPage(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, projectId]);
 
   function handleMetadataSaved(userId: string, key: string, value: unknown) {
     setUsers((prev) =>
@@ -394,9 +426,13 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
   }
 
   function handleUserDeleted(userId: string) {
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    const remaining = users.filter((u) => u.id !== userId);
+    setUsers(remaining);
     setTotal((prev) => prev - 1);
     toast.success("User deleted", "The user has been permanently removed");
+    if (remaining.length === 0 && page > 1) {
+      setPage((p) => p - 1);
+    }
   }
 
   const filtered = search.trim()
@@ -414,7 +450,7 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by email or name…"
+          placeholder="Search this page by email or name…"
           className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
         />
         <div className="text-xs text-zinc-600 flex items-center px-2">
@@ -562,6 +598,33 @@ export function UsersTable({ projectId, initialUsers, initialTotal, initialColum
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4">
+          <p className="text-xs text-zinc-600">
+            Page {page} of {totalPages}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1 || loadingPage}
+              className="cursor-pointer flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300 text-xs transition-colors"
+            >
+              <ChevronLeft size={13} />
+              Prev
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages || loadingPage}
+              className="cursor-pointer flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300 text-xs transition-colors"
+            >
+              Next
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add column panel */}
       {addColumnPanel.visible && (

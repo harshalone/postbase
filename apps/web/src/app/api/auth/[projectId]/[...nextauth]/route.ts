@@ -47,7 +47,7 @@ async function getHandler(req: NextRequest, context: { params: Promise<{ project
   }
 
   const enabledProviders = await getEnabledProviders(projectId);
-  const config = await buildAuthConfig(projectId, enabledProviders);
+  const config = await buildAuthConfig(projectId, enabledProviders, req);
 
   const { handlers } = NextAuth(config);
   const res = await handlers.GET(req);
@@ -71,7 +71,7 @@ async function postHandler(req: NextRequest, context: { params: Promise<{ projec
   }
 
   const enabledProviders = await getEnabledProviders(projectId);
-  const config = await buildAuthConfig(projectId, enabledProviders);
+  const config = await buildAuthConfig(projectId, enabledProviders, req);
 
   const { handlers } = NextAuth(config);
   const res = await handlers.POST(req);
