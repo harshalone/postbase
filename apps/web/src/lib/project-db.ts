@@ -3,8 +3,21 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Each project gets its own PostgreSQL schema: proj_<uuid_no_hyphens>
+//
+// projectId always comes from the `projects.id` uuid column, but every
+// caller of this function interpolates the returned schema name directly
+// into double-quoted SQL identifiers (e.g. `SET search_path TO "${schema}"`).
+// Validating the UUID shape here — rather than trusting callers to have
+// validated it — guarantees the resulting identifier can never contain a
+// `"` or other character that would let a malformed projectId break out of
+// the quoted identifier and inject SQL.
 export function getProjectSchema(projectId: string): string {
+  if (!UUID_RE.test(projectId)) {
+    throw new Error(`Invalid projectId: expected a UUID, got ${JSON.stringify(projectId)}`);
+  }
   return `proj_${projectId.replace(/-/g, "")}`;
 }
 

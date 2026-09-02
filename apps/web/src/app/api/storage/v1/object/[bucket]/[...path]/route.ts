@@ -105,6 +105,34 @@ import { getStorageClient } from "@/lib/storage/client";
 
 type Params = { params: Promise<{ bucket: string; path: string[] }> };
 
+// Hard ceiling enforced regardless of the bucket's configured fileSizeLimit —
+// this server buffers the whole upload into memory (putObject takes a
+// Buffer/Uint8Array, not a stream), so an unbounded body can OOM the shared
+// process. 100 MB is comfortably above typical dashboard-configured limits
+// while still bounding worst-case memory use per upload.
+const HARD_MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+// Read a request/file body into memory, aborting before allocating past
+// `maxBytes` — checking Content-Length alone isn't enough since it can be
+// missing or spoofed, so this also verifies the actual buffered size.
+async function readBodyWithLimit(source: Request | File, maxBytes: number): Promise<Uint8Array> {
+  const declaredLength = source instanceof File ? source.size : Number(source.headers.get("content-length") ?? "0");
+  if (declaredLength && declaredLength > maxBytes) {
+    throw new PayloadTooLargeError(maxBytes);
+  }
+  const buf = new Uint8Array(await source.arrayBuffer());
+  if (buf.byteLength > maxBytes) {
+    throw new PayloadTooLargeError(maxBytes);
+  }
+  return buf;
+}
+
+class PayloadTooLargeError extends Error {
+  constructor(public maxBytes: number) {
+    super(`Payload exceeds maximum upload size of ${maxBytes} bytes`);
+  }
+}
+
 async function auth(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return null;
@@ -150,24 +178,37 @@ async function upload(req: NextRequest, params: Params, upsert: boolean) {
     if (!allowed) return Response.json({ error: "File type not allowed" }, { status: 415 });
   }
 
+  const effectiveLimit = bucket.fileSizeLimit
+    ? Math.min(bucket.fileSizeLimit, HARD_MAX_UPLOAD_BYTES)
+    : HARD_MAX_UPLOAD_BYTES;
+
   let body: Uint8Array;
   let effectiveContentType = contentType;
   const formData = req.headers.get("content-type")?.includes("multipart/form-data");
 
-  if (formData) {
-    const form = await req.formData();
-    const file = form.get("file") as File | null;
-    if (!file) return Response.json({ error: "No file provided" }, { status: 400 });
-    body = new Uint8Array(await file.arrayBuffer());
-    // Use the file's actual mime type, not the multipart envelope's content-type
-    if (file.type) effectiveContentType = file.type;
-  } else {
-    body = new Uint8Array(await req.arrayBuffer());
-  }
-
-  // Check size limit
-  if (bucket.fileSizeLimit && body.byteLength > bucket.fileSizeLimit) {
-    return Response.json({ error: `File too large. Max size: ${bucket.fileSizeLimit} bytes` }, { status: 413 });
+  try {
+    if (formData) {
+      // Multipart bodies are still parsed in full by req.formData() before we
+      // can inspect the individual file part, so the Content-Length pre-check
+      // on the whole request is the only guard available for this branch.
+      const declaredLength = Number(req.headers.get("content-length") ?? "0");
+      if (declaredLength && declaredLength > effectiveLimit) {
+        return Response.json({ error: `File too large. Max size: ${effectiveLimit} bytes` }, { status: 413 });
+      }
+      const form = await req.formData();
+      const file = form.get("file") as File | null;
+      if (!file) return Response.json({ error: "No file provided" }, { status: 400 });
+      body = await readBodyWithLimit(file, effectiveLimit);
+      // Use the file's actual mime type, not the multipart envelope's content-type
+      if (file.type) effectiveContentType = file.type;
+    } else {
+      body = await readBodyWithLimit(req, effectiveLimit);
+    }
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) {
+      return Response.json({ error: `File too large. Max size: ${effectiveLimit} bytes` }, { status: 413 });
+    }
+    throw err;
   }
 
   // Check if object exists (for upsert check)

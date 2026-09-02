@@ -151,6 +151,17 @@ function sanitizeJoinOn(on: string): string {
   return on;
 }
 
+// RETURNING accepts "*" or a comma-separated column list — never a raw
+// expression, since it is otherwise interpolated straight into the SQL text.
+function sanitizeReturning(returning: string): string {
+  const trimmed = returning.trim();
+  if (trimmed === "*") return "*";
+  return trimmed
+    .split(",")
+    .map((c) => `"${sanitizeIdentifier(c.trim())}"`)
+    .join(", ");
+}
+
 type JoinClause = { table: string; on: string; type?: "inner" | "left" | "right" | "full" };
 
 function buildJoinClauses(joins: JoinClause[]): string {
@@ -338,7 +349,7 @@ export async function POST(req: NextRequest) {
     const notFilters = ("notFilters" in input ? input.notFilters : undefined) ?? [];
     const filters = ("filters" in input ? input.filters : undefined) ?? [];
     const orderBy = input.order ?? [];
-    const returning = "returning" in input && input.returning ? input.returning : "*";
+    const returning = sanitizeReturning("returning" in input && input.returning ? input.returning : "*");
 
     switch (input.operation) {
       case "select": {
