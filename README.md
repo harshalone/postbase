@@ -8,16 +8,112 @@ Self-hosted auth + database platform for Next.js. Drop it in, configure your pro
 
 Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 
-| | |
-|---|---|
-| [![Deploy on Railway](https://img.shields.io/badge/Deploy_on-Railway-0B0D0E?style=for-the-badge&logo=railway&logoColor=white)](https://railway.com/deploy/postbase?referralCode=lonare&utm_medium=integration&utm_source=template&utm_campaign=generic) | **Railway** — tested, recommended. Two services (app + managed Postgres), one required secret. See [RAILWAY.md](RAILWAY.md). |
-| [![Deploy to DigitalOcean](https://img.shields.io/badge/Deploy_to-DigitalOcean-0080FF?style=for-the-badge&logo=digitalocean&logoColor=white)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/harshalone/postbase/tree/main) | **DigitalOcean** — tested, recommended. App Platform + managed database, provisioned from the app spec. See [DIGITALOCEAN.md](DIGITALOCEAN.md). |
-| [![Deploy to Render](https://img.shields.io/badge/Deploy_to-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://render.com/deploy?repo=https://github.com/harshalone/postbase) | **Render** — unverified. Blueprint (`render.yaml`) defines the web service + Postgres together. See [RENDER.md](RENDER.md). |
-| [![Deploy to Fly.io](https://img.shields.io/badge/Deploy_to-Fly.io-8B5CF6?style=for-the-badge&logo=flydotio&logoColor=white)](https://fly.io/launch?repo=https://github.com/harshalone/postbase) | **Fly.io** — unverified. Button only runs `fly launch`; run `fly/setup.sh` after for Postgres + secrets. See [FLY.md](FLY.md). |
-| [![Deploy to AWS](https://img.shields.io/badge/Deploy_to-AWS-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white)](https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate?templateURL=https://raw.githubusercontent.com/harshalone/postbase/main/aws/cloudformation.yaml&stackName=postbase) | **AWS** — unverified. CloudFormation: CodeBuild builds the image, deploys to App Runner + RDS Postgres. See [AWS.md](AWS.md). |
-| [![Run on Google Cloud](https://img.shields.io/badge/Run_on-Google_Cloud-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white)](https://console.cloud.google.com/cloudshell/open?git_repo=https://github.com/harshalone/postbase.git&cloudshell_tutorial=gcp/tutorial.md) | **Google Cloud** — unverified. Opens Cloud Shell; `gcp/setup.sh` provisions Cloud SQL and deploys to Cloud Run. See [GCP.md](GCP.md). |
-| [![Deploy to Azure](https://img.shields.io/badge/Deploy_to-Azure-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fharshalone%2Fpostbase%2Fmain%2Fazure%2Fazuredeploy.json) | **Azure** — unverified. ARM/Bicep: ACR Task builds the image, deploys to Container Apps + Postgres Flexible Server. See [AZURE.md](AZURE.md). |
-| [![Deploy to Oracle Cloud](https://img.shields.io/badge/Deploy_to-Oracle_Cloud-F80000?style=for-the-badge&logo=oracle&logoColor=white)](https://cloud.oracle.com/resourcemanager/stacks/create?zipUrl=https://github.com/harshalone/postbase/archive/refs/heads/main.zip) | **Oracle Cloud** — unverified, extra setup required (GitHub token, manual `NEXTAUTH_URL` step). Container Instances + OCI Database with PostgreSQL. See [ORACLE.md](ORACLE.md). |
+<table>
+<tr>
+<td align="center" width="220">
+<a href="https://railway.com/deploy/postbase?referralCode=lonare&utm_medium=integration&utm_source=template&utm_campaign=generic">
+<img src="https://img.logo.dev/railway.app?token=pk_HCUZDWEkROOOd7GfVTccQA&size=200&format=png" width="64" height="64" alt="Railway" /><br/>
+<b>Deploy on Railway</b>
+</a>
+</td>
+<td>
+
+**Railway** — tested, recommended. Two services (app + managed Postgres), one required secret. See [RAILWAY.md](RAILWAY.md).
+
+</td>
+</tr>
+<tr>
+<td align="center" width="220">
+<a href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/harshalone/postbase/tree/main">
+<img src="https://img.logo.dev/digitalocean.com?token=pk_HCUZDWEkROOOd7GfVTccQA&size=200&format=png" width="64" height="64" alt="DigitalOcean" /><br/>
+<b>Deploy to DigitalOcean</b>
+</a>
+</td>
+<td>
+
+**DigitalOcean** — tested, recommended. App Platform + managed database, provisioned from the app spec. See [DIGITALOCEAN.md](DIGITALOCEAN.md).
+
+</td>
+</tr>
+<tr>
+<td align="center" width="220">
+<a href="https://render.com/deploy?repo=https://github.com/harshalone/postbase">
+<img src="https://img.logo.dev/render.com?token=pk_HCUZDWEkROOOd7GfVTccQA&size=200&format=png" width="64" height="64" alt="Render" /><br/>
+<b>Deploy to Render</b>
+</a>
+</td>
+<td>
+
+**Render** — unverified. Blueprint (`render.yaml`) defines the web service + Postgres together. See [RENDER.md](RENDER.md).
+
+</td>
+</tr>
+<tr>
+<td align="center" width="220">
+<a href="https://fly.io/launch?repo=https://github.com/harshalone/postbase">
+<img src="https://img.logo.dev/fly.io?token=pk_HCUZDWEkROOOd7GfVTccQA&size=200&format=png" width="64" height="64" alt="Fly.io" /><br/>
+<b>Deploy to Fly.io</b>
+</a>
+</td>
+<td>
+
+**Fly.io** — unverified. Button only runs `fly launch`; run `fly/setup.sh` after for Postgres + secrets. See [FLY.md](FLY.md).
+
+</td>
+</tr>
+<tr>
+<td align="center" width="220">
+<a href="https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate?templateURL=https://raw.githubusercontent.com/harshalone/postbase/main/aws/cloudformation.yaml&stackName=postbase">
+<img src="https://img.logo.dev/aws.amazon.com?token=pk_HCUZDWEkROOOd7GfVTccQA&size=200&format=png" width="64" height="64" alt="AWS" /><br/>
+<b>Deploy to AWS</b>
+</a>
+</td>
+<td>
+
+**AWS** — unverified. CloudFormation: CodeBuild builds the image, deploys to App Runner + RDS Postgres. See [AWS.md](AWS.md).
+
+</td>
+</tr>
+<tr>
+<td align="center" width="220">
+<a href="https://console.cloud.google.com/cloudshell/open?git_repo=https://github.com/harshalone/postbase.git&cloudshell_tutorial=gcp/tutorial.md">
+<img src="https://img.logo.dev/cloud.google.com?token=pk_HCUZDWEkROOOd7GfVTccQA&size=200&format=png" width="64" height="64" alt="Google Cloud" /><br/>
+<b>Run on Google Cloud</b>
+</a>
+</td>
+<td>
+
+**Google Cloud** — unverified. Opens Cloud Shell; `gcp/setup.sh` provisions Cloud SQL and deploys to Cloud Run. See [GCP.md](GCP.md).
+
+</td>
+</tr>
+<tr>
+<td align="center" width="220">
+<a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fharshalone%2Fpostbase%2Fmain%2Fazure%2Fazuredeploy.json">
+<img src="https://img.logo.dev/azure.microsoft.com?token=pk_HCUZDWEkROOOd7GfVTccQA&size=200&format=png" width="64" height="64" alt="Azure" /><br/>
+<b>Deploy to Azure</b>
+</a>
+</td>
+<td>
+
+**Azure** — unverified. ARM/Bicep: ACR Task builds the image, deploys to Container Apps + Postgres Flexible Server. See [AZURE.md](AZURE.md).
+
+</td>
+</tr>
+<tr>
+<td align="center" width="220">
+<a href="https://cloud.oracle.com/resourcemanager/stacks/create?zipUrl=https://github.com/harshalone/postbase/archive/refs/heads/main.zip">
+<img src="https://img.logo.dev/oracle.com?token=pk_HCUZDWEkROOOd7GfVTccQA&size=200&format=png" width="64" height="64" alt="Oracle Cloud" /><br/>
+<b>Deploy to Oracle Cloud</b>
+</a>
+</td>
+<td>
+
+**Oracle Cloud** — unverified, extra setup required (GitHub token, manual `NEXTAUTH_URL` step). Container Instances + OCI Database with PostgreSQL. See [ORACLE.md](ORACLE.md).
+
+</td>
+</tr>
+</table>
 
 ---
 
