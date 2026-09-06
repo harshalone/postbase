@@ -1,0 +1,330 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Postbase — self-hosted auth + database platform for Next.js.
+  Builds Dockerfile.railway via CodeBuild, pushes to ECR, and runs it on
+  App Runner with a linked RDS Postgres instance.
+
+Parameters:
+  AuthSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: >
+      Shared secret used for NEXTAUTH_SECRET / POSTBASE_JWT_SECRET.
+      Generate one with: openssl rand -base64 32
+  GitHubRepoUrl:
+    Type: String
+    Default: https://github.com/harshalone/postbase.git
+    Description: Repo to build from.
+  GitHubBranch:
+    Type: String
+    Default: main
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: RDS instance class.
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    Description: RDS storage in GB.
+  AppRunnerCpu:
+    Type: String
+    Default: "1 vCPU"
+    AllowedValues: ["0.25 vCPU", "0.5 vCPU", "1 vCPU", "2 vCPU"]
+  AppRunnerMemory:
+    Type: String
+    Default: "2 GB"
+    AllowedValues: ["0.5 GB", "1 GB", "2 GB", "3 GB", "4 GB"]
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to run RDS and the App Runner VPC connector in (use your default VPC unless you know you need another).
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two subnets in the chosen VPC, spanning different AZs.
+
+Resources:
+  # ── ECR repo for the built image ──────────────────────────────────────────
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${AWS::StackName}-postbase"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 5 images",
+                "selection": { "tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 5 },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+
+  # ── Networking: default VPC subnets used for RDS + App Runner egress ──────
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Postbase RDS access from App Runner
+      VpcId: !Ref VpcId
+
+  DBSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref DBSecurityGroup
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Postbase DB subnet group
+      SubnetIds: !Ref SubnetIds
+
+  # ── RDS Postgres ────────────────────────────────────────────────────────
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      Engine: postgres
+      EngineVersion: "16"
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBName: postbase
+      MasterUsername: postbase
+      MasterUserPassword: !Ref AuthSecret
+      VPCSecurityGroups: [!Ref DBSecurityGroup]
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      StorageEncrypted: true
+
+  # ── CodeBuild: clone repo, build Dockerfile.railway, push to ECR ─────────
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PostbaseCodeBuildPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: "*"
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-build"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts: { Type: NO_ARTIFACTS }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - { Name: ECR_REPO_URI, Value: !GetAtt EcrRepository.RepositoryUri }
+          - { Name: AWS_DEFAULT_REGION, Value: !Ref AWS::Region }
+      Source:
+        Type: GITHUB
+        Location: !Ref GitHubRepoUrl
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REPO_URI
+            build:
+              commands:
+                - docker build -f Dockerfile.railway -t $ECR_REPO_URI:latest .
+            post_build:
+              commands:
+                - docker push $ECR_REPO_URI:latest
+      SourceVersion: !Ref GitHubBranch
+      TimeoutInMinutes: 30
+
+  # ── Custom resource: trigger the CodeBuild run once, wait for completion ──
+  TriggerBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PostbaseTriggerBuildPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [codebuild:StartBuild, codebuild:BatchGetBuilds]
+                Resource: !GetAtt CodeBuildProject.Arn
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: "*"
+
+  TriggerBuildFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt TriggerBuildRole.Arn
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3, cfnresponse, time
+
+          def handler(event, context):
+              if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              try:
+                  codebuild = boto3.client('codebuild')
+                  project = event['ResourceProperties']['ProjectName']
+                  build_id = codebuild.start_build(projectName=project)['build']['id']
+                  # Poll until the build finishes (Lambda timeout caps this at 15 min)
+                  while True:
+                      time.sleep(15)
+                      status = codebuild.batch_get_builds(ids=[build_id])['builds'][0]['buildStatus']
+                      if status == 'SUCCEEDED':
+                          cfnresponse.send(event, context, cfnresponse.SUCCESS, {'BuildId': build_id})
+                          return
+                      if status in ('FAILED', 'FAULT', 'STOPPED', 'TIMED_OUT'):
+                          cfnresponse.send(event, context, cfnresponse.FAILED, {'BuildId': build_id, 'Status': status})
+                          return
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  TriggerBuild:
+    Type: Custom::TriggerBuild
+    Properties:
+      ServiceToken: !GetAtt TriggerBuildFunction.Arn
+      ProjectName: !Ref CodeBuildProject
+      # Forces a re-run when the source ref changes
+      SourceVersion: !Ref GitHubBranch
+
+  # ── App Runner ──────────────────────────────────────────────────────────
+  AppRunnerAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: build.apprunner.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  AppRunnerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: tasks.apprunner.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PostbaseInstanceSecretsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameters
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/AUTH_SECRET"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/DATABASE_URL"
+
+  AppRunnerVpcConnector:
+    Type: AWS::AppRunner::VpcConnector
+    Properties:
+      VpcConnectorName: !Sub "${AWS::StackName}-connector"
+      Subnets: !Ref SubnetIds
+      SecurityGroups: [!Ref DBSecurityGroup]
+
+  AppRunnerService:
+    Type: AWS::AppRunner::Service
+    DependsOn: TriggerBuild
+    Properties:
+      ServiceName: !Sub "${AWS::StackName}-postbase"
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerAccessRole.Arn
+        AutoDeploymentsEnabled: false
+        ImageRepository:
+          ImageIdentifier: !Sub "${EcrRepository.RepositoryUri}:latest"
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: "3000"
+            RuntimeEnvironmentVariables:
+              - { Name: HOSTNAME, Value: "0.0.0.0" }
+            RuntimeEnvironmentSecrets:
+              - { Name: DATABASE_URL, Value: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/DATABASE_URL" }
+              - { Name: NEXTAUTH_SECRET, Value: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/AUTH_SECRET" }
+              - { Name: POSTBASE_JWT_SECRET, Value: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/AUTH_SECRET" }
+      InstanceConfiguration:
+        Cpu: !Ref AppRunnerCpu
+        Memory: !Ref AppRunnerMemory
+        InstanceRoleArn: !GetAtt AppRunnerInstanceRole.Arn
+      NetworkConfiguration:
+        EgressConfiguration:
+          EgressType: VPC
+          VpcConnectorArn: !GetAtt AppRunnerVpcConnector.VpcConnectorArn
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /api/health
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+
+  # ── SSM parameters read by App Runner as secrets ──────────────────────────
+  AuthSecretParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/AUTH_SECRET"
+      Type: String
+      Value: !Ref AuthSecret
+
+  DatabaseUrlParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/DATABASE_URL"
+      Type: String
+      Value: !Sub "postgresql://postbase:${AuthSecret}@${Database.Endpoint.Address}:${Database.Endpoint.Port}/postbase"
+
+Outputs:
+  ServiceUrl:
+    Description: Public URL of the deployed Postbase app
+    Value: !Sub "https://${AppRunnerService.ServiceUrl}"
+  EcrRepositoryUri:
+    Value: !GetAtt EcrRepository.RepositoryUri

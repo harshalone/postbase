@@ -1,0 +1,74 @@
+# Resource Manager stack UI schema for the "Deploy to Oracle Cloud" button.
+title: "Deploy Postbase"
+description: "Self-hosted auth + database platform for Next.js — Container Instances + OCI Database with PostgreSQL, built via an OCI DevOps pipeline."
+schemaVersion: 1.1.0
+version: 20230101
+
+variableGroups:
+  - title: "Required Configuration"
+    variables:
+      - compartment_ocid
+      - auth_secret
+  - title: "Source"
+    variables:
+      - github_repo_url
+      - github_branch
+  - title: "Sizing"
+    visible: false
+    variables:
+      - db_shape
+      - container_instance_shape
+      - container_instance_ocpus
+      - container_instance_memory_gb
+
+variables:
+  compartment_ocid:
+    type: oci:identity:compartment:id
+    required: true
+    title: "Compartment"
+    description: "Compartment to create all Postbase resources in."
+
+  auth_secret:
+    type: password
+    required: true
+    title: "Auth Secret"
+    description: "Shared secret for NEXTAUTH_SECRET / POSTBASE_JWT_SECRET. Generate with: openssl rand -base64 32"
+
+  github_repo_url:
+    type: string
+    required: true
+    default: "https://github.com/harshalone/postbase.git"
+    title: "GitHub repository URL"
+
+  github_branch:
+    type: string
+    required: true
+    default: "main"
+    title: "Branch"
+
+  db_shape:
+    type: enum
+    required: true
+    default: "PostgreSQL.VM.Standard.E4.Flex.1.8GB"
+    title: "Database shape"
+
+  container_instance_shape:
+    type: enum
+    required: true
+    default: "CI.Standard.E4.Flex"
+    title: "Container instance shape"
+
+  container_instance_ocpus:
+    type: number
+    default: 1
+    title: "Container instance OCPUs"
+
+  container_instance_memory_gb:
+    type: number
+    default: 4
+    title: "Container instance memory (GB)"
+
+outputGroups:
+  - title: "Deployment Info"
+    outputs:
+      - service_url

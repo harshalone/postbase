@@ -1,0 +1,56 @@
+# Builds Dockerfile.railway, pushes to Artifact Registry, and deploys to Cloud Run.
+# Run via: gcloud builds submit --config gcp/cloudbuild.yaml --substitutions=_REGION=us-central1,_SERVICE=postbase,_REPO=postbase,_INSTANCE_CONNECTION_NAME=...
+#
+# Expects two secrets to already exist in Secret Manager (created by gcp/setup.sh):
+#   postbase-auth-secret   — value used for NEXTAUTH_SECRET / POSTBASE_JWT_SECRET
+#   postbase-database-url  — full postgresql:// connection string (via Cloud SQL Auth Proxy socket)
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.railway
+      - -t
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/postbase:$SHORT_SHA"
+      - -t
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/postbase:latest"
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/postbase"
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - "${_SERVICE}"
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/postbase:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=3000
+      - --add-cloudsql-instances=${_INSTANCE_CONNECTION_NAME}
+      - --set-env-vars=HOSTNAME=0.0.0.0
+      - --set-secrets=DATABASE_URL=postbase-database-url:latest,NEXTAUTH_SECRET=postbase-auth-secret:latest,POSTBASE_JWT_SECRET=postbase-auth-secret:latest
+
+  # Cloud Run only knows the service URL after the first deploy, so NEXTAUTH_URL
+  # is set in a second pass rather than the initial `run deploy` above.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        URL=$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')
+        gcloud run services update ${_SERVICE} --region=${_REGION} --set-env-vars=NEXTAUTH_URL=$$URL
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/postbase:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/postbase:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY

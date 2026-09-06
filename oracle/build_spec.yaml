@@ -1,0 +1,22 @@
+version: 0.1
+component: build
+timeoutInSeconds: 1800
+shell: bash
+
+steps:
+  - type: Command
+    name: "Build image"
+    command: |
+      docker build -f Dockerfile.railway -t postbase:latest .
+
+  - type: Command
+    name: "Tag and push to OCIR"
+    command: |
+      docker login "${OCI_REGION}.ocir.io" -u "${OCIR_USERNAME}" -p "${OCIR_AUTH_TOKEN}"
+      docker tag postbase:latest "${OCI_REGION}.ocir.io/${OCIR_REPO}:latest"
+      docker push "${OCI_REGION}.ocir.io/${OCIR_REPO}:latest"
+
+outputArtifacts:
+  - name: postbase_image
+    type: DOCKER_IMAGE
+    location: "${OCI_REGION}.ocir.io/${OCIR_REPO}:latest"

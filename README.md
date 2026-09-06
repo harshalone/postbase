@@ -10,6 +10,14 @@ Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/postbase?referralCode=lonare&utm_medium=integration&utm_source=template&utm_campaign=generic)
 [![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/harshalone/postbase/tree/main)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/harshalone/postbase)
+[![Deploy to Fly.io](https://img.shields.io/badge/Deploy_to-Fly.io-8B5CF6?logo=flydotio&logoColor=white)](https://fly.io/launch?repo=https://github.com/harshalone/postbase)
+[![Deploy to AWS](https://img.shields.io/badge/Deploy_to-AWS-FF9900?logo=amazonaws&logoColor=white)](https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate?templateURL=https://raw.githubusercontent.com/harshalone/postbase/main/aws/cloudformation.yaml&stackName=postbase)
+[![Run on Google Cloud](https://img.shields.io/badge/Run_on-Google_Cloud-4285F4?logo=googlecloud&logoColor=white)](https://console.cloud.google.com/cloudshell/open?git_repo=https://github.com/harshalone/postbase.git&cloudshell_tutorial=gcp/tutorial.md)
+[![Deploy to Azure](https://img.shields.io/badge/Deploy_to-Azure-0078D4?logo=microsoftazure&logoColor=white)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fharshalone%2Fpostbase%2Fmain%2Fazure%2Fazuredeploy.json)
+[![Deploy to Oracle Cloud](https://img.shields.io/badge/Deploy_to-Oracle_Cloud-F80000?logo=oracle&logoColor=white)](https://cloud.oracle.com/resourcemanager/stacks/create?zipUrl=https://github.com/harshalone/postbase/archive/refs/heads/main.zip)
+
+> Render, Fly.io, AWS, GCP, Azure, and Oracle Cloud templates are new and **unverified against a live account** — see [RENDER.md](RENDER.md), [FLY.md](FLY.md), [AWS.md](AWS.md), [GCP.md](GCP.md), [AZURE.md](AZURE.md), and [ORACLE.md](ORACLE.md) for status, prerequisites, and manual steps. Railway and DigitalOcean above are the tested, recommended path.
 
 ---
 
