@@ -1,0 +1,33 @@
+databases:
+  - name: postbase-db
+    databaseName: postbase
+    plan: starter
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: postbase
+    runtime: docker
+    dockerfilePath: ./Dockerfile.railway
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: PORT
+        value: "3000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: postbase-db
+          property: connectionString
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: NEXTAUTH_SECRET
+        fromEnvVar: AUTH_SECRET
+      - key: POSTBASE_JWT_SECRET
+        fromEnvVar: AUTH_SECRET
+      - key: NEXTAUTH_URL
+        fromService:
+          type: web
+          name: postbase
+          property: hostport
