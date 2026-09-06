@@ -8,6 +8,16 @@ Self-hosted auth + database platform for Next.js. Drop it in, configure your pro
 
 Think: self-hosted Supabase / Clerk — you own the data, you control the infra.
 
+[![npm: postbasejs](https://img.shields.io/npm/v/postbasejs?style=for-the-badge&label=postbasejs&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/postbasejs)
+[![PyPI: postbasepy](https://img.shields.io/pypi/v/postbasepy?style=for-the-badge&label=postbasepy&logo=pypi&logoColor=white&color=3776AB)](https://pypi.org/project/postbasepy/)
+[![pub.dev: postbasefl](https://img.shields.io/pub/v/postbasefl?style=for-the-badge&label=postbasefl&logo=flutter&logoColor=white&color=0175C2)](https://pub.dev/packages/postbasefl)
+
+| SDK | Language | Install |
+|---|---|---|
+| [postbasejs](https://www.npmjs.com/package/postbasejs) | JavaScript / TypeScript | `npm install postbasejs` |
+| [postbasepy](https://pypi.org/project/postbasepy/) | Python | `pip install postbasepy` |
+| [postbasefl](https://pub.dev/packages/postbasefl) | Dart / Flutter | `flutter pub add postbasefl` |
+
 <table>
 <tr>
 <td align="center" width="220">
