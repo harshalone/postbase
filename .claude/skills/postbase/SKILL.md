@@ -665,6 +665,16 @@ The project schema name is derived by removing dashes from the project UUID:
 - Project ID: `736ea91d-0014-4e58-a77a-0b454e94996f`
 - Schema name: `proj_736ea91d00144e58a77a0b454e94996f`
 
+### Reserved table names — `users`, `accounts`, `sessions`, `verification_tokens`
+
+`ensureProjectAuthTables()` auto-provisions these four tables inside every project schema (`proj_<uuid-no-dashes>`) before any user SQL runs — they are **not** global/shared across projects, but they already exist in *your* project by the time you open the SQL editor. Running `CREATE TABLE accounts (...)` (or `users`/`sessions`/`verification_tokens`) fails with:
+
+```
+error: relation "accounts" already exists
+```
+
+This is expected, not a bug — the SQL editor already runs with `search_path` set to your project schema, so the table really is being created in the right place; it just collides with the pre-existing auth table of the same name. Pick a different name for your own tables (`profiles`, `my_accounts`, `app_users`, etc.) and sync from `users` via a trigger if you need to extend the built-in user record — see "Bridging `users` to your app table" below.
+
 ### Auth tables (in the project schema)
 
 #### `users`
@@ -705,7 +715,8 @@ CREATE TABLE "accounts" (
     "token_type"          text,
     "scope"               text,
     "id_token"            text,
-    "session_state"       text
+    "session_state"       text,
+    PRIMARY KEY ("provider", "provider_account_id")
 );
 ```
 
@@ -724,8 +735,22 @@ CREATE TABLE "sessions" (
 );
 ```
 
+#### `verification_tokens`
+
+Used for magic-link and OTP verification. A row is inserted when a code/link is sent and consumed (deleted) on successful verification.
+
+```sql
+CREATE TABLE "verification_tokens" (
+    "identifier" text NOT NULL,   -- typically the email address
+    "token"      text NOT NULL,
+    "expires"    timestamp NOT NULL,
+    PRIMARY KEY ("identifier", "token")
+);
+```
+
 **Key facts:**
 - `users.id` is the canonical user UUID used in `current_setting('postbase.user_id', true)` for RLS
+- These four tables (`users`, `accounts`, `sessions`, `verification_tokens`) are reserved names — see "Reserved table names" above
 - `email_verified` is `NULL` for email/OTP users until they verify; set immediately for OAuth/Apple
 - These tables live in the project schema — refer to them as just `users` / `accounts` / `sessions` inside trigger functions (after `SET search_path`)
 - **Do NOT query `accounts` from inside a trigger** — the OAuth row may not exist yet when the `users` INSERT trigger fires

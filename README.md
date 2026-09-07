@@ -442,6 +442,10 @@ const { data } = await postbase.sql('SELECT count(*) FROM posts WHERE created_at
 > **anon key** — enforces Row Level Security policies on your tables.
 > **service_role key** — bypasses RLS. Server-side only.
 
+#### Reserved table names
+
+Every project schema (`proj_<uuid-no-dashes>`) is auto-provisioned with four auth tables before you ever run SQL yourself: **`users`**, **`accounts`**, **`sessions`**, **`verification_tokens`**. They aren't global — they live inside your own project schema — but they already exist, so `CREATE TABLE accounts (...)` (or `users`/`sessions`/`verification_tokens`) will fail with `relation "accounts" already exists`. Name your own tables something else (e.g. `profiles`, `my_accounts`) and sync from `users` via a trigger if you need to extend the built-in user record — see the [Claude Code skill](skills/postbase/SKILL.md) for the pattern.
+
 ### Storage
 
 ```ts
