@@ -1,6 +1,6 @@
 {
   "name": "postbase",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "license": "MIT",
   "private": true,
   "packageManager": "pnpm@9.0.0",

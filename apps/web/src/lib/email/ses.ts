@@ -59,10 +59,14 @@ export function buildTransportConfig(settings: EmailSettings): SMTPTransport.Opt
     };
   }
 
+  const smtpPort = settings.smtpPort ?? 587;
   return {
     host: settings.smtpHost!,
-    port: settings.smtpPort ?? 587,
-    secure: settings.smtpSecure ?? true,
+    port: smtpPort,
+    // Port 465 uses implicit TLS; every other port (587, 25, ...) uses STARTTLS,
+    // which nodemailer negotiates on its own when `secure` is false.
+    secure: smtpPort === 465,
+    requireTLS: smtpPort !== 465 ? (settings.smtpSecure ?? true) : undefined,
     auth: settings.smtpUser
       ? { user: settings.smtpUser, pass: settings.smtpPassword ?? "" }
       : undefined,
