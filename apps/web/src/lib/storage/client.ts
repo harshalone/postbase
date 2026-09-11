@@ -55,16 +55,15 @@ class S3Client implements StorageAdapter {
       ? await sha256Hex(bodyAsArrayBuffer)
       : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
+    // content-length is intentionally not signed: fetch() manages this header
+    // itself and can override or drop a manually-set value, which would make
+    // the actual request diverge from what was signed (R2 rejects the mismatch).
     const headers: Record<string, string> = {
       host: url.host,
       "x-amz-date": amzDate,
       "x-amz-content-sha256": contentHash,
       ...options.headers,
     };
-
-    if (options.body) {
-      headers["content-length"] = String(options.body.length);
-    }
 
     const signedHeaders = Object.keys(headers).sort().join(";");
     const canonicalHeaders = Object.entries(headers)
