@@ -168,9 +168,9 @@ async function testS3Connection(opts: {
   const method = "GET";
   const canonicalUri = opts.endpoint ? `/${bucket}/` : "/";
   const canonicalQuerystring = "list-type=2&max-keys=1";
-  const canonicalHeaders = `host:${host}\nx-amz-date:${amzdate}\n`;
-  const signedHeaders = "host;x-amz-date";
   const payloadHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // SHA256 of empty string
+  const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzdate}\n`;
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
 
   const canonicalRequest = [
     method,
@@ -224,6 +224,7 @@ async function testS3Connection(opts: {
     method,
     headers: {
       Host: host,
+      "x-amz-content-sha256": payloadHash,
       "x-amz-date": amzdate,
       Authorization: authHeader,
     },
