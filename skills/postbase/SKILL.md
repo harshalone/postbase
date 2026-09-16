@@ -610,7 +610,9 @@ const postbase = createServerClient(url, anonKey, {
 })
 await postbase.auth.getSession()
 
-// Client component
+// Client component — see "Browser session → SSR cookie bridge" below for
+// why plain createBrowserClient(url, anonKey, { projectId }) alone leaves the
+// server unable to see logins.
 import { createBrowserClient } from 'postbasejs/ssr'
 const postbase = createBrowserClient(url, anonKey, { projectId })
 ```
@@ -618,6 +620,49 @@ const postbase = createBrowserClient(url, anonKey, { projectId })
 > **v0.5.13 fix:** `auth.setSession()` on a server client used to set the session cookie's `Secure` flag based on the Postbase API's URL scheme (`https://...`) rather than the app's own origin. That breaks whenever the API is HTTPS but the app runs on `http://localhost` in dev — Chrome accepts a `Secure` cookie on localhost, Safari silently drops it, so the session never persists and users loop back to the login page after OTP/OAuth. Fixed by deriving `Secure` from `NODE_ENV === 'production'`. Upgrade to ≥ 0.5.13 if you see Safari-only login loops.
 
 > **v0.5.17 fix:** `auth.setSession()`'s cookie `maxAge` used to be derived from `session.expiresAt` — the access token's ~1-hour TTL — even though the cookie stores the refresh token. The login cookie therefore always expired in ~1 hour regardless of the refresh token's real 7/30-day TTL. Fixed by adding `session.refreshTokenExpiresAt` (the refresh token's own expiry) and deriving `maxAge` from that instead; falls back to a 7-day default if absent. **Requires Postbase server ≥ the version that returns `refreshTokenExpiresAt`** in `/token`, `/email-otp/verify`, `/oauth/callback/*`, `/oauth/id-token`, and `PATCH /session` responses — on an older server this field is simply missing and the 7-day fallback applies (same behavior as before the fix). Upgrade both server and SDK to get the correct cookie lifetime.
+
+### Browser session → SSR cookie bridge (`auth.syncEndpoint`)
+
+**The bug this fixes:** `createBrowserClient` persists sessions to `localStorage` only. `fetch()` never sends `localStorage` data, so the very next SSR/API request via `createServerClient` sees no session — `getUser()`/`getSession()` return `null` even immediately after a successful sign-in. This hits **every** browser sign-in path (OAuth, password, OTP), not just OAuth. Typical symptom: user logs in via GitHub OAuth, browser has a session, but the first server-rendered page (e.g. a dashboard route calling `getUser()`) 401s and bounces back to `/login`.
+
+**Root cause:** the SDK's internal `syncSessionCookie()` (which writes the httpOnly `postbase-session` cookie) is gated behind a `cookieAdapter`, and `createBrowserClient` never supplies one — nor could it fully, since the cookie's value is the **refresh token** and must stay `httpOnly`, which browser JS can never write directly. The real fix is a server round-trip, not a browser-writable cookie.
+
+**Fix (postbasejs ≥ 0.6.0):** pass `auth.syncEndpoint` to `createBrowserClient`, pointing at a route built with `createAuthCallbackHandler`. The browser client then auto-POSTs the session to that route on every `SIGNED_IN` / `TOKEN_REFRESHED` / `SIGNED_OUT`, and the handler calls `setSession()` server-side to write the real httpOnly cookie — no manual `fetch()` needed in your OAuth callback page.
+
+```ts
+// app/api/auth/callback/route.ts
+import { cookies } from 'next/headers'
+import { createAuthCallbackHandler } from 'postbasejs/ssr'
+
+export const POST = createAuthCallbackHandler({
+  url: process.env.NEXT_PUBLIC_POSTBASE_URL!,
+  key: process.env.NEXT_PUBLIC_POSTBASE_ANON_KEY!,
+  projectId: process.env.NEXT_PUBLIC_POSTBASE_PROJECT_ID,
+  cookies: async () => {
+    const store = await cookies()
+    return {
+      getAll: () => store.getAll(),
+      setAll: (cs) => cs.forEach(c => store.set(c.name, c.value, c.options)),
+    }
+  },
+})
+```
+
+```ts
+// utils/postbase/client.ts
+import { createBrowserClient } from 'postbasejs/ssr'
+
+export function createClient() {
+  return createBrowserClient(url, anonKey, {
+    projectId,
+    auth: { syncEndpoint: '/api/auth/callback' },
+  })
+}
+```
+
+`syncEndpoint` is opt-in and unset by default — upgrading to ≥ 0.6.0 alone changes nothing until you set it. Sync failures are swallowed (best-effort), so a missing/misconfigured route never breaks sign-in itself; it just means the server-side bridge silently doesn't happen, so check for the route's existence first when 401s persist after upgrading.
+
+On an SDK < 0.6.0, or if custom logic is needed in the bridge route, do it manually: call `postbase.auth.handleOAuthCallback()` client-side, then `fetch('/api/auth/callback', { method: 'POST', credentials: 'include', body: JSON.stringify({ session: data.session }) })` to a hand-written route that calls `createServerClient(...).auth.setSession(session)`.
 
 ### Environment Variables
 
