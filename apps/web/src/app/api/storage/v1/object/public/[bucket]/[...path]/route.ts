@@ -31,21 +31,27 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ buc
   const { bucket: bucketName, path: pathParts } = await params;
   const objectPath = pathParts.join("/");
 
-  const [bucket] = await db
-    .select()
-    .from(storageBuckets)
-    .where(and(eq(storageBuckets.name, bucketName), eq(storageBuckets.public, true)))
-    .limit(1);
-
-  if (!bucket) return Response.json({ error: "Not found" }, { status: 404 });
-
-  const [obj] = await db
-    .select()
+  // Bucket names are only unique per-project, not globally — a name-only
+  // lookup here could resolve to a different project's same-named public
+  // bucket and 404 on an object that actually exists. Joining through
+  // storageObjects instead means we only ever match a bucket that actually
+  // holds the requested object, so the result is correct regardless of how
+  // many projects reuse the same bucket name.
+  const [row] = await db
+    .select({ bucket: storageBuckets, obj: storageObjects })
     .from(storageObjects)
-    .where(and(eq(storageObjects.bucketId, bucket.id), eq(storageObjects.name, objectPath)))
+    .innerJoin(storageBuckets, eq(storageObjects.bucketId, storageBuckets.id))
+    .where(
+      and(
+        eq(storageBuckets.name, bucketName),
+        eq(storageBuckets.public, true),
+        eq(storageObjects.name, objectPath)
+      )
+    )
     .limit(1);
 
-  if (!obj) return Response.json({ error: "Not found" }, { status: 404 });
+  if (!row) return Response.json({ error: "Not found" }, { status: 404 });
+  const { bucket, obj } = row;
 
   try {
     const storage = await getStorageClient(bucket.projectId);

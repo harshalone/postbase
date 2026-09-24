@@ -7,6 +7,7 @@ import {
   jsonb,
   uuid,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -68,17 +69,28 @@ export const providerConfigs = postbaseSchema.table(
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 
-export const storageBuckets = postbaseSchema.table("storage_buckets", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  public: boolean("public").default(false).notNull(),
-  fileSizeLimit: integer("file_size_limit"), // bytes, null = unlimited
-  allowedMimeTypes: text("allowed_mime_types").array(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+export const storageBuckets = postbaseSchema.table(
+  "storage_buckets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    public: boolean("public").default(false).notNull(),
+    fileSizeLimit: integer("file_size_limit"), // bytes, null = unlimited
+    allowedMimeTypes: text("allowed_mime_types").array(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    // Bucket names are only meant to be unique within a project. Without this,
+    // two projects could both create a bucket named e.g. "lonare", and the
+    // public object-serving route (which looks buckets up by name only, since
+    // anonymous requests carry no project id) could resolve to the wrong
+    // project's bucket.
+    projectNameUnique: uniqueIndex("storage_buckets_project_name_idx").on(t.projectId, t.name),
+  })
+);
 
 export const storageObjects = postbaseSchema.table(
   "storage_objects",

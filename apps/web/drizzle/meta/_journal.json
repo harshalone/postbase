@@ -43,6 +43,13 @@
       "when": 1743206400000,
       "tag": "0005_sql_query_history",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774986000000,
+      "tag": "0009_storage_bucket_project_unique",
+      "breakpoints": true
     }
   ]
 }
