@@ -6,10 +6,13 @@
  * POST action=upload                 — upload a file (multipart form: file, path)
  * POST action=delete                 — delete objects (body: { keys: string[] })
  * POST action=mkdir                  — create a "folder" placeholder
+ * POST action=reconcile               — backfill storage_objects for files
+ *                                       already in the bucket but missing
+ *                                       their row (see getOrCreateBucketRow)
  */
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { storageConnections } from "@/lib/db/schema";
+import { storageConnections, storageBuckets, storageObjects } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 
 type Params = { params: Promise<{ projectId: string; connectionId: string }> };
@@ -237,6 +240,27 @@ function parseListXml(xml: string) {
   return { objects, isTruncated, nextToken };
 }
 
+// ─── Guess mime type from extension ──────────────────────────────────────────
+//
+// ListObjectsV2 doesn't return content-type, so a reconcile pass can't read
+// the real mime type without a HEAD request per object. Extension-based
+// guessing keeps the backfill a single paginated LIST scan; it mirrors the
+// same guess table the file-detail panel already uses for display.
+const MIME_BY_EXT: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+  webp: "image/webp", svg: "image/svg+xml", avif: "image/avif", ico: "image/x-icon",
+  mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm", mkv: "video/x-matroska",
+  mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac", aac: "audio/aac",
+  pdf: "application/pdf", json: "application/json", zip: "application/zip",
+  txt: "text/plain", md: "text/markdown", csv: "text/csv",
+  html: "text/html", css: "text/css", js: "text/javascript", ts: "text/typescript",
+};
+
+function guessMimeType(key: string): string {
+  const ext = key.split(".").pop()?.toLowerCase() ?? "";
+  return MIME_BY_EXT[ext] ?? "application/octet-stream";
+}
+
 // ─── Resolve connection ───────────────────────────────────────────────────────
 
 async function getConnection(projectId: string, connectionId: string) {
@@ -251,6 +275,68 @@ async function getConnection(projectId: string, connectionId: string) {
     )
     .limit(1);
   return conn ?? null;
+}
+
+// ─── Keep storage_objects in sync with direct R2 writes ──────────────────────
+//
+// The file browser writes straight to the provider using the connection's
+// credentials, bypassing the /api/storage/v1/object routes entirely. Those
+// routes (including the public object route) resolve everything through the
+// storage_buckets/storage_objects tables, so a file uploaded here would exist
+// in the underlying bucket but stay invisible — and its public URL would
+// always 404 — unless we mirror the write into those tables too.
+//
+// storage_buckets.name doubles as the literal provider bucket name elsewhere
+// in the app (see the auto-registration on connection create), so we look up
+// the bucket row the same way: by (projectId, name = conn.bucket).
+async function getOrCreateBucketRow(projectId: string, bucketName: string) {
+  const [existing] = await db
+    .select({ id: storageBuckets.id })
+    .from(storageBuckets)
+    .where(and(eq(storageBuckets.projectId, projectId), eq(storageBuckets.name, bucketName)))
+    .limit(1);
+
+  if (existing) return existing.id;
+
+  const [created] = await db
+    .insert(storageBuckets)
+    .values({ projectId, name: bucketName, public: false })
+    .returning({ id: storageBuckets.id });
+
+  return created.id;
+}
+
+async function upsertObjectRow(
+  bucketId: string,
+  objectPath: string,
+  size: number,
+  mimeType: string
+) {
+  const [existing] = await db
+    .select({ id: storageObjects.id })
+    .from(storageObjects)
+    .where(and(eq(storageObjects.bucketId, bucketId), eq(storageObjects.name, objectPath)))
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(storageObjects)
+      .set({ size, mimeType })
+      .where(eq(storageObjects.id, existing.id));
+  } else {
+    await db.insert(storageObjects).values({ bucketId, name: objectPath, size, mimeType });
+  }
+}
+
+async function deleteObjectRows(bucketId: string, objectPaths: string[]) {
+  if (!objectPaths.length) return;
+  await Promise.all(
+    objectPaths.map((path) =>
+      db
+        .delete(storageObjects)
+        .where(and(eq(storageObjects.bucketId, bucketId), eq(storageObjects.name, path)))
+    )
+  );
 }
 
 // ─── GET — list objects ───────────────────────────────────────────────────────
@@ -335,9 +421,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     const body = new Uint8Array(await file.arrayBuffer());
     const ab = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
 
+    const fileContentType = file.type || "application/octet-stream";
     const res = await client.signedFetch("PUT", path, {
       body: ab,
-      contentType: file.type || "application/octet-stream",
+      contentType: fileContentType,
     });
 
     if (!res.ok) {
@@ -345,6 +432,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       const msg = text.match(/<Message>([\s\S]*?)<\/Message>/)?.[1] ?? `Upload failed: HTTP ${res.status}`;
       return Response.json({ error: msg }, { status: res.status });
     }
+
+    const bucketId = await getOrCreateBucketRow(projectId, conn.bucket);
+    await upsertObjectRow(bucketId, path, body.byteLength, fileContentType);
 
     return Response.json({ success: true, path });
   }
@@ -385,6 +475,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       return Response.json({ error: `Some deletes failed: ${failed.join(", ")}` }, { status: 207 });
     }
 
+    // Only the keys that actually deleted from the provider should drop out
+    // of storage_objects too, but every key here succeeded (we'd have
+    // returned above otherwise), so it's safe to clear all of them.
+    const bucketId = await getOrCreateBucketRow(projectId, conn.bucket);
+    await deleteObjectRows(bucketId, keys);
+
     return Response.json({ success: true, deleted: keys.length });
   }
 
@@ -406,6 +502,57 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     return Response.json({ success: true, path: folderPath });
+  }
+
+  // Backfill storage_objects for files already sitting in the bucket that
+  // were never registered — e.g. anything uploaded here before this sync
+  // existed, or written directly to the provider outside Postbase.
+  if (body.action === "reconcile") {
+    const bucketId = await getOrCreateBucketRow(projectId, conn.bucket);
+    let continuationToken: string | undefined;
+    let scanned = 0;
+    let created = 0;
+
+    do {
+      const query: Record<string, string> = {
+        "list-type": "2",
+        "max-keys": "1000",
+      };
+      if (continuationToken) query["continuation-token"] = continuationToken;
+
+      const res = await client.signedFetch("GET", "", { query });
+      if (!res.ok) {
+        const text = await res.text();
+        const msg = text.match(/<Message>([\s\S]*?)<\/Message>/)?.[1] ?? `HTTP ${res.status}`;
+        return Response.json({ error: msg, scanned, created }, { status: res.status });
+      }
+
+      const xml = await res.text();
+      const { objects, isTruncated, nextToken } = parseListXml(xml);
+
+      for (const obj of objects) {
+        scanned++;
+        const [existing] = await db
+          .select({ id: storageObjects.id })
+          .from(storageObjects)
+          .where(and(eq(storageObjects.bucketId, bucketId), eq(storageObjects.name, obj.key)))
+          .limit(1);
+
+        if (!existing) {
+          await db.insert(storageObjects).values({
+            bucketId,
+            name: obj.key,
+            size: obj.size,
+            mimeType: guessMimeType(obj.key),
+          });
+          created++;
+        }
+      }
+
+      continuationToken = isTruncated ? (nextToken ?? undefined) : undefined;
+    } while (continuationToken);
+
+    return Response.json({ success: true, scanned, created });
   }
 
   return Response.json({ error: "Unknown action" }, { status: 400 });

@@ -396,6 +396,7 @@ export default function StorageBrowserPage({
   const [search, setSearch] = useState("");
   const [nextToken, setNextToken] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
 
   const fetchObjects = useCallback(
     async (p = prefix) => {
@@ -526,6 +527,32 @@ export default function StorageBrowserPage({
     fetchObjects(prefix);
   }
 
+  async function handleReconcile() {
+    setReconciling(true);
+    try {
+      const res = await fetch(
+        `/api/dashboard/${projectId}/storage/${connectionId}/browse`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "reconcile" }),
+        }
+      );
+      const data = await res.json();
+      if (data.error) {
+        toast.error("Reconcile failed", data.error);
+        return;
+      }
+      toast.success(
+        "Reconciled",
+        `Scanned ${data.scanned} file${data.scanned === 1 ? "" : "s"}, registered ${data.created} missing.`
+      );
+      fetchObjects(prefix);
+    } finally {
+      setReconciling(false);
+    }
+  }
+
   async function handleMkdir(name: string) {
     const folderPath = prefix + name;
     const res = await fetch(
@@ -639,6 +666,15 @@ export default function StorageBrowserPage({
                 Delete ({selectedKeys.length})
               </button>
             )}
+            <button
+              onClick={handleReconcile}
+              disabled={reconciling}
+              title="Register files already in this bucket that are missing from Postbase (fixes 404s on public URLs)"
+              className="cursor-pointer flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors disabled:opacity-50"
+            >
+              {reconciling ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+              Reconcile
+            </button>
             <button
               onClick={() => setShowNewFolder(true)}
               className="cursor-pointer flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-700 transition-colors"
