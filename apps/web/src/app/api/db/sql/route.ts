@@ -4,7 +4,7 @@
  *   post:
  *     summary: Execute a raw parameterized SQL query
  *     tags: [Database]
- *     description: Run an arbitrary parameterized SQL query against the project database. RLS context is enforced. Use $1, $2, … placeholders for params.
+ *     description: Run an arbitrary parameterized SQL query against the project database. Requires the service role key (anon keys are rejected with 403). Use $1, $2, … placeholders for params.
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -33,6 +33,8 @@
  *         description: Invalid payload or query error
  *       401:
  *         description: Missing or invalid API key
+ *       403:
+ *         description: Key is not a service role key
  */
 import { NextRequest } from "next/server";
 import { pool } from "@/lib/db";
@@ -55,6 +57,12 @@ export async function POST(req: NextRequest) {
   const keyInfo = await validateApiKey(apiKey);
   if (!keyInfo) {
     return Response.json({ error: "Invalid API key" }, { status: 401 });
+  }
+  if (keyInfo.type !== "service_role") {
+    return Response.json(
+      { error: "Raw SQL requires the service role key" },
+      { status: 403 }
+    );
   }
 
   let body: unknown;

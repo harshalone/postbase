@@ -61,6 +61,7 @@
  */
 import { NextRequest } from "next/server";
 import { pool } from "@/lib/db";
+import { applyRequestRole } from "@/lib/db-role";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
 import { getProjectSchema } from "@/lib/project-db";
@@ -343,6 +344,7 @@ export async function POST(req: NextRequest) {
     // Always set it explicitly (even to null) so a pooled connection never
     // inherits postbase.user_id left over from a previous request.
     await client.query("SELECT set_config('postbase.user_id', $1, true)", [userId]);
+    await applyRequestRole(client, keyInfo.projectId, keyInfo.type, userId);
 
     const table = sanitizeIdentifier(input.table);
     const orFilters = ("orFilters" in input ? input.orFilters : undefined) ?? [];

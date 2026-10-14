@@ -177,11 +177,11 @@ Body:
 
 ### Raw SQL — `/api/db/sql`
 
-Execute a raw parameterized SQL query. RLS context is still enforced — the user JWT is applied before the query runs.
+Execute a raw parameterized SQL query. **Requires the service role key** — anon keys get `403`. Server-side only; never expose the service key to the browser. RLS context is still applied from the optional user JWT.
 
 ```
 POST /api/db/sql
-Authorization: Bearer <api_key>
+Authorization: Bearer <service_role_key>
 X-Postbase-Token: <user_jwt>   (optional — enables RLS)
 
 Body:
@@ -375,7 +375,7 @@ const { data } = await postbase.from<ApiWithPlan>('apis')
 
 ### Raw SQL
 
-For queries that can't be expressed with the builder (CTEs, window functions, complex aggregates). RLS still applies.
+For queries that can't be expressed with the builder (CTEs, window functions, complex aggregates). **Requires the service role key** (server-side only); anon/user keys get `403`.
 
 ```ts
 const { data, error } = await postbase.sql<{ id: string; email: string }>(
@@ -693,6 +693,16 @@ CREATE POLICY "own rows" ON posts
     user_id = current_setting('postbase.user_id', true)::uuid
   );
 ```
+
+**Enforced RLS (opt-in).** By default the pool connects as a superuser, so RLS policies are skipped. Set `ENFORCE_RLS_PROJECT_IDS` (comma-separated project ids, or `*`) on the server to enable it per project. For those projects, anon and user-token requests to `/api/db/query` and `/api/rpc/*` run in a transaction as the non-superuser roles `postbase_anon` / `postbase_authenticated` (`SET LOCAL ROLE`, auto-reverted at commit/rollback); service-key requests keep full access. Off by default — other projects are unchanged.
+
+Consequences for an enforced project:
+- Grants are applied when the project's built-in tables are initialised; new tables inherit them via default privileges.
+- `users`, `accounts`, `sessions`, `verification_tokens`, other projects' schemas, `_postbase` and `public` are not accessible to the restricted roles.
+- Granted tables with RLS off are wide open: every table you create needs `ENABLE ROW LEVEL SECURITY` plus policies (RLS on with no policies = deny all).
+- Views bypass RLS unless `security_invoker = true`; `SECURITY DEFINER` functions run as owner (set `search_path`, validate inputs); RPC functions must not call `set_config` or `RESET ROLE`.
+- `/api/db/sql` and SDK `postbase.sql()` require the service role key (403 otherwise), because raw SQL could `set_config('postbase.user_id', …)` to impersonate users. `/api/rpc/*` now runs in a transaction for enforced projects, so `postbase.user_id` reaches RPC functions.
+- Roll out to one project first; projects that relied on open table access can break.
 
 Each `/api/db/query` and `/api/db/sql` request runs its RLS `set_config` calls and the query itself inside a single transaction on the pooled connection, and `postbase.user_id` is always set explicitly — to the resolved user ID, or to `NULL` when no valid `X-Postbase-Token` is present. This guarantees `current_setting('postbase.user_id', true)` never leaks a value from a previous request on the same pooled connection, and returns `NULL` (not `''`) for anonymous requests — so casting it to `::uuid` in a policy is always safe.
 

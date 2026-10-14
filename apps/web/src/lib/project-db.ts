@@ -2,6 +2,7 @@ import { Pool, PoolClient } from "pg";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { isRlsEnforced, ensureRlsRoles, grantProjectSchema } from "@/lib/db-role";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -195,6 +196,13 @@ export async function ensureProjectAuthTables(
       CREATE INDEX IF NOT EXISTS "${schema}_sessions_user_idx"
         ON "${schema}"."sessions" ("user_id")
     `);
+
+    // Opt-in: give the restricted RLS roles access to this schema (credential
+    // tables stay revoked). Runs after the built-in tables exist.
+    if (isRlsEnforced(schema)) {
+      await ensureRlsRoles(client);
+      await grantProjectSchema(client, schema);
+    }
 
     initialisedSchemas.set(schema, SCHEMA_VERSION);
   } finally {

@@ -47,6 +47,7 @@ import { Pool } from "pg";
 import { z } from "zod";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
+import { applyRequestRole, isRlsEnforced } from "@/lib/db-role";
 import { getProjectSchema } from "@/lib/project-db";
 
 const bodySchema = z.object({
@@ -103,6 +104,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ fn:
   const argList = argKeys.map((k, i) => `${k} => $${i + 1}`).join(", ");
   const sql = `SELECT * FROM ${schema}.${fnSafe}(${argList})`;
 
+  const enforced = isRlsEnforced(keyInfo.projectId);
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   const client = await pool.connect();
 
@@ -111,24 +113,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ fn:
     // schema.fn(...) needs it to resolve the function's composite return
     // type (e.g. `RETURNS events`) when expanding `*`, independent of the
     // function body's own internal `SET search_path`.
+    // Role switching and transaction-local set_config only persist inside a
+    // transaction, so enforced projects run the call in one. Other projects
+    // keep the original behaviour.
+    if (enforced) await client.query("BEGIN");
     await client.query(`SET search_path TO "${schema}", public`);
     // Set RLS context
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
     await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
-    if (userId) {
+    if (userId || enforced) {
       await client.query("SELECT set_config('postbase.user_id', $1, true)", [userId]);
     }
+    if (enforced) await applyRequestRole(client, keyInfo.projectId, keyInfo.type, userId);
 
+    let body: { data: unknown[]; count: number | null };
     if (parsed.data.count === "exact") {
       const countResult = await client.query(`SELECT COUNT(*) FROM (${sql}) AS _rpc_count`, values);
       const total = parseInt(countResult.rows[0].count, 10);
       const result = await client.query(sql, values);
-      return Response.json({ data: result.rows, count: total });
+      body = { data: result.rows, count: total };
+    } else {
+      const result = await client.query(sql, values);
+      body = { data: result.rows, count: result.rowCount };
     }
-
-    const result = await client.query(sql, values);
-    return Response.json({ data: result.rows, count: result.rowCount });
+    if (enforced) await client.query("COMMIT");
+    return Response.json(body);
   } catch (err) {
+    if (enforced) await client.query("ROLLBACK").catch(() => {});
     const message = err instanceof Error ? err.message : "RPC failed";
     return Response.json({ error: message }, { status: 400 });
   } finally {
@@ -152,15 +163,21 @@ export async function HEAD(req: NextRequest, { params }: { params: Promise<{ fn:
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   const client = await pool.connect();
+  const enforced = isRlsEnforced(keyInfo.projectId);
   try {
     const headSchema = getProjectSchema(keyInfo.projectId);
+    // HEAD carries no user token, so enforced projects run it as anon.
+    if (enforced) await client.query("BEGIN");
     await client.query(`SET search_path TO "${headSchema}", public`);
     await client.query("SELECT set_config('postbase.project_id', $1, true)", [keyInfo.projectId]);
     await client.query("SELECT set_config('postbase.role', $1, true)", [keyInfo.type]);
+    if (enforced) await applyRequestRole(client, keyInfo.projectId, keyInfo.type, null);
     const result = await client.query(`SELECT COUNT(*) FROM ${headSchema}.${fnSafe}()`);
     const count = result.rows[0].count;
+    if (enforced) await client.query("COMMIT");
     return new Response(null, { headers: { "X-Postbase-Count": count } });
   } catch {
+    if (enforced) await client.query("ROLLBACK").catch(() => {});
     return new Response(null, { status: 400 });
   } finally {
     await client.query("RESET search_path").catch(() => {});

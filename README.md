@@ -441,6 +441,22 @@ const { data } = await postbase.sql('SELECT count(*) FROM posts WHERE created_at
 
 > **anon key** — enforces Row Level Security policies on your tables.
 > **service_role key** — bypasses RLS. Server-side only.
+>
+> By default the database connection is a superuser, which skips RLS entirely. To make policies take effect for anon and signed-in requests, enable [Enforced RLS](#enforced-rls-opt-in).
+
+#### Enforced RLS (opt-in)
+
+Set `ENFORCE_RLS_PROJECT_IDS` to a comma-separated list of project ids (or `*` for every project). For those projects, anon and user-token requests to `/api/db/query` and `/api/rpc/*` run inside a transaction as the non-superuser roles `postbase_anon` / `postbase_authenticated` (`SET LOCAL ROLE`, reverted automatically at commit/rollback). Service-key requests keep full access. It is **off by default**, so existing projects behave as before.
+
+For an enforced project:
+- Roles and grants are created the next time the project's built-in tables are initialised; new tables in the schema inherit the grants via default privileges.
+- `users`, `accounts`, `sessions` and `verification_tokens` are not readable by the restricted roles, and neither are other projects' schemas, `_postbase`, or `public`.
+- A table that is granted but has RLS off is wide open: run `ENABLE ROW LEVEL SECURITY` and add policies on every table you create. RLS-enabled tables with no policies deny everything.
+- Views bypass RLS unless created with `security_invoker = true`. `SECURITY DEFINER` functions run as their owner, so set their `search_path` and validate inputs.
+- RPC functions run as the caller; they must not call `set_config` or `RESET ROLE`.
+- Enable it for one project first, since projects that relied on open table access can break.
+
+**Raw SQL (`/api/db/sql`) requires the service role key.** Anon and user keys get `403`. Without this, a restricted caller could run `set_config('postbase.user_id', …)` and impersonate another user.
 
 #### Reserved table names
 
@@ -506,6 +522,7 @@ Enable any of these from the dashboard — no code changes needed.
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://postbase:postbase@localhost:5432/postbase` |
 | `NEXTAUTH_SECRET` | Secret for signing tokens — **required** | — |
 | `NEXTAUTH_URL` | Public URL of your Postbase instance | `http://localhost:3000` |
+| `ENFORCE_RLS_PROJECT_IDS` | Comma-separated project ids (or `*`) that run anon/user requests as restricted DB roles so RLS applies | unset (off) |
 
 ---
 
