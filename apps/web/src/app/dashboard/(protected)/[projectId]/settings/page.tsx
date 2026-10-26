@@ -4,6 +4,8 @@ import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { PageHeader } from "../_components/page-header";
 import { GeneralSettingsForm } from "./general-settings-form";
+import { SecuritySettingsForm } from "./security-settings-form";
+import { isRlsEnforced } from "@/lib/db-role";
 import { DeleteProjectDialog } from "./delete-project-dialog";
 
 export default async function SettingsPage({
@@ -31,6 +33,13 @@ export default async function SettingsPage({
             projectId={project.id}
             initialName={project.name}
             slug={project.slug}
+          />
+
+          {/* Security */}
+          <SecuritySettingsForm
+            projectId={project.id}
+            initialEnforceRls={project.enforceRls}
+            lockedByEnv={isRlsEnforced(project.id)}
           />
 
           {/* Auth Settings */}

@@ -446,7 +446,7 @@ const { data } = await postbase.sql('SELECT count(*) FROM posts WHERE created_at
 
 #### Enforced RLS (opt-in)
 
-Set `ENFORCE_RLS_PROJECT_IDS` to a comma-separated list of project ids (or `*` for every project). For those projects, anon and user-token requests to `/api/db/query` and `/api/rpc/*` run inside a transaction as the non-superuser roles `postbase_anon` / `postbase_authenticated` (`SET LOCAL ROLE`, reverted automatically at commit/rollback). Service-key requests keep full access. It is **off by default**, so existing projects behave as before.
+Turn it on per project with the **Enforce Row Level Security** toggle in the dashboard (project → Settings → Security), or set `ENFORCE_RLS_PROJECT_IDS` to a comma-separated list of project ids (or `*` for every project); either enables it. For those projects, anon and user-token requests to `/api/db/query` and `/api/rpc/*` run inside a transaction as the non-superuser roles `postbase_anon` / `postbase_authenticated` (`SET LOCAL ROLE`, reverted automatically at commit/rollback). Service-key requests keep full access. It is **off by default**, so existing projects behave as before.
 
 For an enforced project:
 - Roles and grants are created the next time the project's built-in tables are initialised; new tables in the schema inherit the grants via default privileges.

@@ -50,6 +50,13 @@
       "when": 1774986000000,
       "tag": "0009_storage_bucket_project_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775072400000,
+      "tag": "0010_project_enforce_rls",
+      "breakpoints": true
     }
   ]
 }

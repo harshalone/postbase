@@ -649,7 +649,7 @@ CREATE POLICY "own rows" ON posts
   );
 ```
 
-**Enforced RLS (opt-in).** By default the pool connects as a superuser, so RLS policies are skipped. Set `ENFORCE_RLS_PROJECT_IDS` (comma-separated project ids, or `*`) on the server to enable it per project. For those projects, anon and user-token requests to `/api/db/query` and `/api/rpc/*` run in a transaction as the non-superuser roles `postbase_anon` / `postbase_authenticated` (`SET LOCAL ROLE`, auto-reverted at commit/rollback); service-key requests keep full access. Off by default — other projects are unchanged.
+**Enforced RLS (opt-in).** By default the pool connects as a superuser, so RLS policies are skipped. Enable it per project with the **Enforce Row Level Security** toggle in Dashboard → project → Settings → Security, or server-wide with `ENFORCE_RLS_PROJECT_IDS` (comma-separated project ids, or `*`; a project enabled this way shows the toggle locked on). For those projects, anon and user-token requests to `/api/db/query` and `/api/rpc/*` run in a transaction as the non-superuser roles `postbase_anon` / `postbase_authenticated` (`SET LOCAL ROLE`, auto-reverted at commit/rollback); service-key requests keep full access. Off by default — other projects are unchanged.
 
 Consequences for an enforced project:
 - Grants are applied when the project's built-in tables are initialised; new tables inherit them via default privileges.

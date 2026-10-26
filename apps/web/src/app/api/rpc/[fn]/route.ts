@@ -47,7 +47,7 @@ import { Pool } from "pg";
 import { z } from "zod";
 import { validateApiKey } from "@/lib/auth/keys";
 import { verifyJwt, getJwtSecret } from "@/lib/auth/jwt";
-import { applyRequestRole, isRlsEnforced } from "@/lib/db-role";
+import { applyRequestRole, isRlsEnforcedForProject } from "@/lib/db-role";
 import { getProjectSchema } from "@/lib/project-db";
 
 const bodySchema = z.object({
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ fn:
   const argList = argKeys.map((k, i) => `${k} => $${i + 1}`).join(", ");
   const sql = `SELECT * FROM ${schema}.${fnSafe}(${argList})`;
 
-  const enforced = isRlsEnforced(keyInfo.projectId);
+  const enforced = await isRlsEnforcedForProject(keyInfo.projectId);
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   const client = await pool.connect();
 
@@ -163,7 +163,7 @@ export async function HEAD(req: NextRequest, { params }: { params: Promise<{ fn:
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   const client = await pool.connect();
-  const enforced = isRlsEnforced(keyInfo.projectId);
+  const enforced = await isRlsEnforcedForProject(keyInfo.projectId);
   try {
     const headSchema = getProjectSchema(keyInfo.projectId);
     // HEAD carries no user token, so enforced projects run it as anon.

@@ -37,6 +37,9 @@ export const projects = postbaseSchema.table("projects", {
   databaseUrl: text("database_url"), // optional: per-project DB
   // Stores label/type metadata for custom user columns (source of truth is real DB columns)
   userColumnDefs: jsonb("user_column_defs").default([]),
+  // Opt-in: run anon/user requests as restricted DB roles so RLS applies.
+  // ENFORCE_RLS_PROJECT_IDS also enables it, independent of this flag.
+  enforceRls: boolean("enforce_rls").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

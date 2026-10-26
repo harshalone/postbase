@@ -1,10 +1,14 @@
 import type { PoolClient } from "pg";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { projects } from "@/lib/db/schema";
 
 // Row-level security only applies to roles that are neither superusers nor
 // BYPASSRLS. The pool logs in as a superuser, so enforcement works by
 // switching to a weaker role with SET LOCAL ROLE for the life of the
-// transaction. Opt-in per project via ENFORCE_RLS_PROJECT_IDS
-// (comma-separated project ids, or "*" for all).
+// transaction. Opt-in per project via the dashboard setting
+// (projects.enforce_rls) or ENFORCE_RLS_PROJECT_IDS (comma-separated project
+// ids, or "*" for all). Either one enables it.
 
 export const ANON_ROLE = "postbase_anon";
 export const AUTHENTICATED_ROLE = "postbase_authenticated";
@@ -19,11 +23,37 @@ const SCHEMA_RE = /^proj_[0-9a-f]{32}$/;
 // Accepts a project uuid or its proj_<hex> schema name.
 const normalizeId = (id: string) => id.trim().toLowerCase().replace(/^proj_/, "").replace(/-/g, "");
 
+/** Env-var check only (no DB lookup). */
 export function isRlsEnforced(projectIdOrSchema: string): boolean {
   const raw = process.env.ENFORCE_RLS_PROJECT_IDS ?? "";
   const ids = raw.split(",").map((s) => s.trim()).filter(Boolean);
   if (ids.includes("*")) return true;
   return ids.map(normalizeId).includes(normalizeId(projectIdOrSchema));
+}
+
+const FLAG_TTL_MS = 10_000;
+const flagCache = new Map<string, { value: boolean; at: number }>();
+
+export function invalidateRlsCache(projectIdOrSchema: string): void {
+  flagCache.delete(normalizeId(projectIdOrSchema));
+}
+
+/** Env var or the per-project dashboard flag. The flag is cached briefly. */
+export async function isRlsEnforcedForProject(projectIdOrSchema: string): Promise<boolean> {
+  if (isRlsEnforced(projectIdOrSchema)) return true;
+  const key = normalizeId(projectIdOrSchema);
+  const hit = flagCache.get(key);
+  if (hit && Date.now() - hit.at < FLAG_TTL_MS) return hit.value;
+  if (!/^[0-9a-f]{32}$/.test(key)) return false;
+  const uuid = key.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
+  const [row] = await db
+    .select({ enforceRls: projects.enforceRls })
+    .from(projects)
+    .where(eq(projects.id, uuid))
+    .limit(1);
+  const value = row?.enforceRls ?? false;
+  flagCache.set(key, { value, at: Date.now() });
+  return value;
 }
 
 /** Role to run a request as, or null to keep the full-power pool role. */
@@ -43,7 +73,7 @@ export async function applyRequestRole(
   keyType: string,
   userId: string | null
 ): Promise<boolean> {
-  if (!isRlsEnforced(projectId)) return false;
+  if (!(await isRlsEnforcedForProject(projectId))) return false;
   const role = roleFor(keyType, userId);
   if (!role) return false;
   // role is one of two constants, never user input
