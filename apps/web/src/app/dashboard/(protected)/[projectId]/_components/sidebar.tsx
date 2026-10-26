@@ -65,14 +65,18 @@ export function ProjectSidebar({ projectId, projectName }: { projectId: string; 
       {/* Logo */}
       <Link
         href="/dashboard"
-        className="cursor-pointer p-4 border-b border-zinc-800 flex items-center gap-2.5 hover:bg-zinc-900 transition-colors h-14"
+        className="cursor-pointer px-4 pt-2.5 border-b border-zinc-800 flex items-start gap-2.5 hover:bg-zinc-900 transition-colors h-14"
       >
         <Image src="/logo.png" alt="Postbase" width={28} height={28} className="shrink-0" />
         {!collapsed && (
           <div className="flex flex-col min-w-0">
-            <span className="font-bold text-lg text-white leading-tight">Postbase</span>
+            <span className="font-bold text-lg text-white leading-none">Postbase</span>
             {projectName && (
-              <span className="text-[10px] text-zinc-600 leading-tight truncate">{projectName}</span>
+              // w-0 + min-w-full keeps the name from widening the column, so it
+              // truncates at the width of the "Postbase" title.
+              <span className="mt-1 block w-0 min-w-full text-[10px] text-zinc-500 leading-none truncate">
+                {projectName}
+              </span>
             )}
           </div>
         )}
